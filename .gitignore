@@ -4,12 +4,31 @@ __pycache__/
 *.pyo
 
 # Runtime data / secrets (created at runtime, kept in Railway Volume)
-*.json
-*.json.lock
-*.db
+accounts.json
+sessions.json
+coupon_shares.json
+prizes.db
 *.db-wal
 *.db-shm
+eda_accounts.json
+eda_cards.json
+eda_sessions.json
+sp_gifts.json
+sp_wheel.json
+market_accounts.json
+samokat_accounts.json
+courier_data.json
+courier_data.json.lock
+users.json
+users.json.lock
+demo_accounts.json
+cookies*.json
+capture_*.jsonl
+
+# Logs
 *.log
+*.err
+*.out
 
 # Local / OS
 .env
@@ -21,3 +40,6 @@ __pycache__/
 # Test/scratch artifacts
 _t_*.py
 _*.txt
+probe_*.py
+inject_*.py
+capture_*.py
