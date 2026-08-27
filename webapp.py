@@ -1,0 +1,4430 @@
+import sys, os, json, threading, hashlib, re, requests
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import core
+import pickup
+import eda
+import samokat
+import eda_reg
+import market
+from flask import Flask, jsonify, request, render_template, Response, session, redirect, url_for
+from concurrent.futures import ThreadPoolExecutor
+import time
+
+app = Flask(__name__)
+
+# Админка закрывается паролем из env ADMIN_PASSWORD.
+# Если переменная не задана (локальная разработка) — админка открыта.
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
+app.secret_key = hashlib.sha256((ADMIN_PASSWORD or 'local-dev').encode()).hexdigest()
+
+
+@app.before_request
+def guard():
+    """Пользователь (pickup-клиент /p/... и купоны /c/...) не имеет доступа
+    к админке. Админ-роуты защищены паролем, если ADMIN_PASSWORD задан."""
+    if not ADMIN_PASSWORD:
+        return None
+    p = request.path
+    if (p.startswith('/static') or p.startswith('/p/') or
+            p.startswith('/api/pickup/') or p.startswith('/c/') or p == '/login' or
+            p == '/api/activate-key' or
+            p.startswith('/courier') or p.startswith('/api/courier/') or
+            p.startswith('/demo') or p.startswith('/api/demo/') or
+            (p.startswith('/api/coupons/shares/') and p.endswith('/data'))):
+        return None
+    if session.get('admin'):
+        return None
+    if p.startswith('/api/'):
+        return jsonify({'error': 'Требуется вход в админку'}), 401
+    return redirect(url_for('login_page'))
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login_page():
+    if not ADMIN_PASSWORD:
+        return redirect(url_for('index'))
+    if request.method == 'POST':
+        if request.form.get('password', '') == ADMIN_PASSWORD:
+            session['admin'] = True
+            return redirect(url_for('index'))
+        return render_template('login.html', error='Неверный пароль')
+    return render_template('login.html', error=None)
+
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login_page'))
+
+
+@app.after_request
+def no_cache(resp):
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
+
+# per-account live logs
+LOGS = {}
+LOCK = threading.Lock()
+
+
+def get_logs(name):
+    with LOCK:
+        return LOGS.setdefault(name, [])
+
+
+def push_log(name, line):
+    with LOCK:
+        LOGS.setdefault(name, []).append({'t': time.strftime('%H:%M:%S'), 'line': line})
+
+
+def run_in_thread(name):
+    def log(line):
+        push_log(name, line)
+    accs = core.load_accounts()
+    acc = next((a for a in accs if a.get('name') == name), None)
+    if not acc:
+        push_log(name, f'ERROR: account "{name}" not found')
+        return
+    try:
+        core.play_account(acc, log)
+    except Exception as e:
+        push_log(name, f'ERROR: {e}')
+    push_log(name, '--- finished ---')
+
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+
+@app.route('/api/accounts')
+def api_accounts():
+    accs = core.load_accounts()
+    running = core.runs.running()
+    result = []
+    for a in accs:
+        result.append({
+            'name': a.get('name'),
+            'event_id': a.get('event_id'),
+            'device_id': a.get('device_id', '')[:8] + '...',
+            'running': a.get('name') in running,
+            'last_updated': None,
+        })
+    return jsonify(result)
+
+
+@app.route('/api/accounts/<name>/status')
+def api_account_status(name):
+    accs = core.load_accounts()
+    acc = next((a for a in accs if a.get('name') == name), None)
+    if not acc:
+        return jsonify({'error': 'not found'}), 404
+    try:
+        at = core.refresh_magnit_token(acc)
+        games = {}
+        # Суперпризы от М.косметик
+        try:
+            rs = core.get_game_token(acc, at, event_id='pBvsPKf7hGXlGBg5zBnsn')
+            data = core.auth_game_bts(rs)
+            user = data.get('user', {})
+            pending = data.get('pending_rewards') or []
+            base = user.get('attempts_count') or 0
+            pend_sum = sum((t.get('attempts') or 0) for t in pending)
+            games['pBvsPKf7hGXlGBg5zBnsn'] = {
+                'game': 'Суперпризы от М.косметик',
+                'attempts': base + pend_sum,
+                'base_attempts': base,
+                'pending_attempts': pend_sum,
+                'last_level': None,
+                'daily_reward_ready': bool(pending),
+                'pending_tasks': len(pending),
+            }
+        except Exception as e:
+            games['pBvsPKf7hGXlGBg5zBnsn'] = {'game': 'Суперпризы от М.косметик', 'error': str(e)[:120]}
+        # Монстро-планетяне
+        try:
+            rs = core.get_game_token(acc, at, event_id='At99RuZXsCpnFRhpmEZCK')
+            data = core.auth_game_monstro(rs)
+            user = data.get('user', {})
+            pending = data.get('pending_rewards') or []
+            base = user.get('attempts_count') or 0
+            pend_sum = sum((t.get('attempts') or 0) for t in pending)
+            games['At99RuZXsCpnFRhpmEZCK'] = {
+                'game': 'Монстро-планетяне',
+                'attempts': base + pend_sum,
+                'base_attempts': base,
+                'pending_attempts': pend_sum,
+                'last_level': None,
+                'daily_reward_ready': bool(pending),
+                'pending_tasks': len(pending),
+                'chances': user.get('chances_count'),
+            }
+        except Exception as e:
+            games['At99RuZXsCpnFRhpmEZCK'] = {'game': 'Монстро-планетяне', 'error': str(e)[:120]}
+        return jsonify({
+            'name': name,
+            'games': games,
+            'active_event_id': acc.get('event_id'),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/accounts/<name>/extras')
+def api_account_extras(name):
+    accs = core.load_accounts()
+    acc = next((a for a in accs if a.get('name') == name), None)
+    if not acc:
+        return jsonify({'error': 'not found'}), 404
+    try:
+        at = core.refresh_magnit_token(acc)
+        return jsonify({
+            'name': name,
+            'balance': core.get_balance(acc, at),
+            'offers': core.get_offers(acc, at),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/accounts/<name>/coupons')
+def api_account_coupons(name):
+    accs = core.load_accounts()
+    acc = next((a for a in accs if a.get('name') == name), None)
+    if not acc:
+        return jsonify({'error': 'not found'}), 404
+    try:
+        cs = pickup.coupons(name)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    out = []
+    for c in cs:
+        it = (c.get('items') or [{}])[0]
+        out.append({
+            'id': c.get('favoriteId'),
+            'title': c.get('title') or '',
+            'subtitle': c.get('subtitle') or '',
+            'code': (it or {}).get('couponCode') or c.get('favoriteId') or '',
+            'display_type': c.get('displayType'),
+            'discount_value': (it or {}).get('discountValue'),
+            'discount_type': (it or {}).get('discountType'),
+            'expiration_date': c.get('expirationDate'),
+            'image': c.get('smallImageUrl') or c.get('largeImageUrl') or c.get('promoImageUrl') or '',
+        })
+    return jsonify({'ok': True, 'coupons': out})
+
+
+@app.route('/api/accounts/<name>/play', methods=['POST'])
+def api_play(name):
+    started, err = core.runs.start(name)
+    if err:
+        return jsonify({'error': err}), 409
+    push_log(name, '--- started ---')
+    threading.Thread(target=run_in_thread, args=(name,), daemon=True).start()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/accounts/play-all', methods=['POST'])
+def api_play_all():
+    """Запустить автоплей одновременно на всех аккаунтах."""
+    accs = core.load_accounts()
+    if not accs:
+        return jsonify({'error': 'нет аккаунтов'}), 400
+    results = []
+    for a in accs:
+        name = a.get('name')
+        started, err = core.runs.start(name)
+        if err:
+            results.append({'name': name, 'status': 'already_running'})
+            continue
+        push_log(name, '--- started (all) ---')
+        threading.Thread(target=run_in_thread, args=(name,), daemon=True).start()
+        results.append({'name': name, 'status': 'started'})
+    return jsonify({'ok': True, 'results': results})
+
+
+@app.route('/api/accounts/<name>/rewards/claim', methods=['POST'])
+def api_claim_daily(name):
+    accs = core.load_accounts()
+    acc = next((a for a in accs if a.get('name') == name), None)
+    if not acc:
+        return jsonify({'error': 'not found'}), 404
+    lines = []
+    log = lambda l: lines.append(l)
+    try:
+        at = core.refresh_magnit_token(acc)
+        results = {}
+        # Суперпризы от М.косметик — pending rewards (ежедневный бонус и задачи)
+        try:
+            rs = core.get_game_token(acc, at, event_id='pBvsPKf7hGXlGBg5zBnsn')
+            data = core.auth_game_bts(rs)
+            h = core.bts_headers(data['token'])
+            got = 0
+            for task in (data.get('pending_rewards') or []):
+                tid = task.get('task_id')
+                if not tid:
+                    continue
+                rew = core.claim_daily_reward_bts(h, [tid])
+                g = (rew.get('reward') or {}).get('attempts', 0)
+                got += g
+                log(f'   task {tid} reward: +{g} attempts')
+            results['pBvsPKf7hGXlGBg5zBnsn'] = {'game': 'Суперпризы от М.косметик', 'attempts_got': got}
+        except Exception as e:
+            results['pBvsPKf7hGXlGBg5zBnsn'] = {'game': 'Суперпризы от М.косметик', 'error': str(e)[:120]}
+        # Монстро — pending rewards (ежедневный бонус и задачи)
+        try:
+            rs = core.get_game_token(acc, at, event_id='At99RuZXsCpnFRhpmEZCK')
+            data = core.auth_game_monstro(rs)
+            h = core.mh_headers(data['token'])
+            got = 0
+            for task in (data.get('pending_rewards') or []):
+                tid = task.get('task_id')
+                if not tid:
+                    continue
+                rew = core.claim_daily_reward_monstro(h, [tid])
+                g = (rew.get('reward') or {}).get('attempts', 0)
+                got += g
+                log(f'   task {tid} reward: +{g} attempts')
+            results['At99RuZXsCpnFRhpmEZCK'] = {'game': 'Монстро-планетяне', 'attempts_got': got}
+        except Exception as e:
+            results['At99RuZXsCpnFRhpmEZCK'] = {'game': 'Монстро-планетяне', 'error': str(e)[:120]}
+        return jsonify({'ok': True, 'results': results, 'log': lines})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/accounts/<name>/game', methods=['POST'])
+def api_account_set_game(name):
+    d = request.get_json(force=True, silent=True) or {}
+    event_id = str(d.get('event_id', '')).strip()
+    if event_id not in core.GAME_EVENTS.values():
+        return jsonify({'error': 'unknown event_id'}), 400
+    accs = core.load_accounts()
+    acc = next((a for a in accs if a.get('name') == name), None)
+    if not acc:
+        return jsonify({'error': 'not found'}), 404
+    acc['event_id'] = event_id
+    core.save_accounts(accs)
+    return jsonify({'ok': True, 'event_id': event_id})
+
+
+@app.route('/api/accounts/<name>/logs')
+def api_logs(name):
+    logs = get_logs(name)
+    return Response('\n'.join(f'[{x["t"]}] {x["line"]}' for x in logs), mimetype='text/plain')
+
+
+@app.route('/api/accounts/<name>/logs/stream')
+def api_logs_stream(name):
+    def gen():
+        last = 0
+        while True:
+            logs = get_logs(name)
+            if len(logs) > last:
+                for x in logs[last:]:
+                    yield f'[{x["t"]}] {x["line"]}\n'
+                last = len(logs)
+            time.sleep(0.5)
+    return Response(gen(), mimetype='text/event-stream')
+
+
+@app.route('/api/accounts/from-token', methods=['POST'])
+def api_account_from_token():
+    d = request.get_json(force=True)
+    name = str(d.get('name', '')).strip()
+    token = str(d.get('refresh_token', '')).strip()
+    event_id = str(d.get('event_id', '')).strip() or 'pBvsPKf7hGXlGBg5zBnsn'
+    if not name or not token:
+        return jsonify({'error': 'name and refresh_token required'}), 400
+    try:
+        core.add_account_by_token(name, token, event_id=event_id)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'name': name})
+
+
+@app.route('/api/register/start', methods=['POST'])
+def api_register_start():
+    d = request.get_json(force=True)
+    phone = core.norm_phone(str(d.get('phone', '')).strip())
+    name = str(d.get('name', '')).strip() or None
+    first_name = str(d.get('first_name', '')).strip() or None
+    birth_date = str(d.get('birth_date', '')).strip() or None
+    event_id = str(d.get('event_id', '')).strip() or 'pBvsPKf7hGXlGBg5zBnsn'
+    if not phone:
+        return jsonify({'error': 'phone required'}), 400
+    try:
+        reg = core.add_account(phone, name, first_name, birth_date, event_id=event_id)
+        core.store_pending(reg)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'name': reg['name']})
+
+
+@app.route('/api/register/confirm', methods=['POST'])
+def api_register_confirm():
+    d = request.get_json(force=True)
+    name = str(d.get('name', '')).strip()
+    phone = core.norm_phone(str(d.get('phone', '')).strip()) if d.get('phone') else None
+    code = str(d.get('code', '')).strip()
+    if (not name and not phone) or not code:
+        return jsonify({'error': 'phone/name and code required'}), 400
+    reg = core.get_pending(name or phone)
+    if not reg:
+        return jsonify({'error': 'pending registration state not found, restart registration'}), 400
+    try:
+        core.confirm_account(reg, code)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'name': reg['name']})
+
+
+@app.route('/api/accounts/<name>/coupons/sync', methods=['POST'])
+def api_coupons_sync(name):
+    accs = core.load_accounts()
+    acc = next((a for a in accs if a.get('name') == name), None)
+    if not acc:
+        return jsonify({'error': 'not found'}), 404
+    try:
+        added = core.sync_coupons(acc, lambda line: push_log(name, line))
+        return jsonify({'ok': True, 'added': added})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/accounts/<name>/rewards/sync', methods=['POST'])
+def api_rewards_sync(name):
+    accs = core.load_accounts()
+    acc = next((a for a in accs if a.get('name') == name), None)
+    if not acc:
+        return jsonify({'error': 'not found'}), 404
+    try:
+        added = core.sync_game_rewards(acc, lambda line: push_log(name, line))
+        return jsonify({'ok': True, 'added': added})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/accounts/<name>', methods=['DELETE'])
+def api_delete(name):
+    accs = core.load_accounts()
+    accs = [a for a in accs if a.get('name') != name]
+    core.save_accounts(accs)
+    return jsonify({'ok': True})
+
+
+# ---------- Яндекс Еда: cookie-аккаунты ----------
+
+@app.route('/api/eda/accounts')
+def api_eda_accounts():
+    accs = eda.load_eda_accounts()
+
+    def orders(a):
+        try:
+            return eda.order_count(a)
+        except Exception:
+            return None
+
+    with ThreadPoolExecutor(max_workers=max(len(accs), 1)) as ex:
+        counts = list(ex.map(orders, accs))
+    return jsonify([{'name': a.get('name'),
+                     'added': a.get('added'),
+                     'has_token': bool(eda._extract_bearer(a)),
+                     'has_sid': bool(eda.sp_session_id(a)),
+                     'uid': a.get('yandexuid', ''),
+                     'profile_name': a.get('profile_name', ''),
+                     'plus_balance': a.get('plus_balance'),
+                     'plus_status': a.get('plus_status', ''),
+                     'device': (a.get('device') or {}).get('model', ''),
+                     'warmup_at': a.get('warmup_at'),
+                     'promo_ready_at': a.get('promo_ready_at'),
+                     'orders': counts[i]}
+                    for i, a in enumerate(accs)])
+
+
+@app.route('/api/eda/accounts', methods=['POST'])
+def api_eda_accounts_add():
+    data = request.get_json(silent=True) or {}
+    try:
+        accs = eda.add_eda_account(data.get('name', ''), data.get('cookies', ''),
+                                   token=data.get('token', ''), yandexuid=data.get('yandexuid', ''),
+                                   session_id=data.get('session_id', ''))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    added = accs[-1] if accs else {}
+    return jsonify({'ok': True, 'account': {
+        'name': added.get('name', ''),
+        'token': added.get('token', ''),
+        'profile_name': added.get('profile_name', ''),
+    }})
+
+
+@app.route('/api/eda/cards')
+def api_eda_cards():
+    return jsonify({'ok': True, 'cards': eda.load_eda_cards()})
+
+
+@app.route('/api/eda/cards', methods=['POST'])
+def api_eda_cards_add():
+    data = request.get_json(silent=True) or {}
+    try:
+        entry = eda.eda_card_add(data.get('label', ''), data.get('card', ''))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'card': entry})
+
+
+@app.route('/api/eda/cards/<cid>', methods=['DELETE'])
+def api_eda_cards_delete(cid):
+    ok = eda.eda_card_delete(cid)
+    return jsonify({'ok': ok})
+
+
+@app.route('/api/eda/qr/start', methods=['POST'])
+def api_eda_qr_start():
+    data = request.get_json(silent=True) or {}
+    account_name = data.get('account', '')
+    try:
+        qr_id, link = eda.qr_start(account_name)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    return jsonify({'ok': True, 'qr_id': qr_id, 'link': link})
+
+
+@app.route('/api/eda/qr/status/<qr_id>')
+def api_eda_qr_status(qr_id):
+    return jsonify(eda.qr_status(qr_id))
+
+
+@app.route('/qr')
+def page_qr():
+    return render_template('qr.html')
+
+
+@app.route('/landing')
+def page_landing():
+    return render_template('landing.html')
+
+
+@app.route('/api/eda/reg/start', methods=['POST'])
+def api_eda_reg_start():
+    data = request.get_json(silent=True) or {}
+    try:
+        ids = eda_reg.start(data.get('name', ''), int(data.get('count', 1) or 1))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'task_ids': ids})
+
+
+@app.route('/api/eda/reg/status')
+def api_eda_reg_status():
+    return jsonify(eda_reg.status())
+
+
+@app.route('/api/eda/reg/status/<task_id>')
+def api_eda_reg_status_one(task_id):
+    return jsonify(eda_reg.status(task_id))
+
+
+@app.route('/api/eda/reg/cancel/<task_id>', methods=['POST'])
+def api_eda_reg_cancel(task_id):
+    return jsonify(eda_reg.cancel(task_id))
+
+
+@app.route('/api/eda/accounts/<name>', methods=['DELETE'])
+def api_eda_accounts_delete(name):
+    eda.delete_eda_account(name)
+
+
+@app.route('/api/eda/accounts/<name>/refresh', methods=['POST'])
+def api_eda_accounts_refresh(name):
+    try:
+        res = eda.refresh_eda_account(name)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, **res})
+
+
+@app.route('/api/eda/accounts/<name>/rotate-device', methods=['POST'])
+def api_eda_accounts_rotate_device(name):
+    try:
+        dev = eda.rotate_eda_device(name)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'device': dev})
+
+
+@app.route('/api/eda/accounts/<name>/plus-subscribe', methods=['POST'])
+def api_eda_plus_subscribe(name):
+    """Подключение подписки «Яндекс Плюс» на аккаунте (GQL-флоу виджета).
+
+    Тело: {card?, sms_code?, purchase_token?, invoice_id?, offer_token?,
+    tariff_offer?, event_session_id?}. Первый вызов: создаёт инвойс и форму
+    Траста (stage 'form' с form_url); повторный с invoice_id проверяет
+    результат (stage 'done'/'pending'). Ошибки возвращаются {ok: False, error}
+    со статусом 200.
+    """
+    d = request.get_json(silent=True) or {}
+    try:
+        res = eda.plus_subscribe(
+            name,
+            card=d.get('card', ''),
+            sms_code=str(d.get('sms_code', '') or ''),
+            purchase_token=str(d.get('purchase_token', '') or ''),
+            kroken_uuid=str(d.get('kroken_uuid', '') or ''),
+            invoice_id=str(d.get('invoice_id', '') or ''),
+            offer_token=str(d.get('offer_token', '') or ''),
+            tariff_offer=str(d.get('tariff_offer', '') or ''),
+            event_session_id=str(d.get('event_session_id', '') or ''),
+            wait_status=bool(d.get('wait_status')),
+            save=True,
+        )
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 200
+    if isinstance(res, dict) and res.get('ok') is False and res.get('error'):
+        return jsonify(res), 200
+    return jsonify(res)
+
+
+# ---------- Полуавто 3DS (Playwright) ----------
+#
+# После plus-subscribe со stage '3ds' открываем challenge-страницу банка в
+# Chrome (куки аккаунта подставляются автоматически), пользователь вводит
+# SMS-код, фоновый воркер ловит success по check_payment/invoiceStatus и
+# сам активирует подписку (changeStatus ALLOW).
+PLUS_3DS_TASKS = {}
+PLUS_3DS_LOCK = threading.Lock()
+
+
+def _plus_3ds_cookies(acc):
+    ck = eda._web_cookies(acc) or {}
+    return [{'name': k, 'value': str(v), 'domain': '.yandex.ru', 'path': '/'}
+            for k, v in ck.items() if v not in (None, '', 'None')]
+
+
+def _plus_3ds_worker(name, purchase_token, invoice_id, challenge_url, csrf,
+                     timeout=600):
+    """Открыть challenge-страницу в Chrome и ждать завершения 3DS."""
+    from playwright.sync_api import sync_playwright
+    acc = eda.get_eda_account(name)
+    m = re.search(r'[?&]external_id=([^&\s]+)', challenge_url or '')
+    external_id = m.group(1) if m else ''
+    state = {'stage': '3ds', 'purchase_token': purchase_token,
+             'invoice_id': invoice_id, 'challenge_url': challenge_url,
+             'external_id': external_id, 'auth_status': '',
+             'opened_at': time.time()}
+    with PLUS_3DS_LOCK:
+        PLUS_3DS_TASKS[name] = state
+    res = {}
+    try:
+        # Проверка до открытия браузера: истёкший/готовый челлендж — не открывать
+        auth = ''
+        if external_id:
+            try:
+                auth = eda.plus_3ds_auth_status(acc, external_id, csrf=csrf)
+            except Exception as e:
+                auth = ''
+            state['auth_status'] = auth
+        if auth == 'failed':
+            res = {'ok': False, 'stage': 'failed',
+                   'error': 'Trust не принял 3DS (auth_status failed). '
+                            'Вероятно, платёж истёк — повторите подписку.'}
+        elif auth == 'success':
+            res = eda._plus_3ds_done(acc, purchase_token, invoice_id, csrf,
+                                     activate=True, check={})
+        else:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(channel='chrome', headless=False)
+                ctx = browser.new_context()
+                ctx.add_cookies(_plus_3ds_cookies(acc))
+                page = ctx.new_page()
+                page.goto(challenge_url, timeout=45000)
+                deadline = time.time() + timeout
+                while time.time() < deadline:
+                    if external_id:
+                        try:
+                            auth = eda.plus_3ds_auth_status(acc, external_id,
+                                                            csrf=csrf)
+                        except Exception:
+                            auth = ''
+                        state['auth_status'] = auth
+                        if auth == 'failed':
+                            res = {'ok': False, 'stage': 'failed',
+                                   'error': 'Trust не принял 3DS '
+                                            '(auth_status failed).'}
+                            break
+                    res = eda.plus_3ds_wait(acc, purchase_token,
+                                            invoice_id=invoice_id, csrf=csrf,
+                                            timeout=15, poll=2.0, activate=True)
+                    if res.get('stage') in ('done', 'failed', 'timeout'):
+                        break
+                    time.sleep(2.0)
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+    except Exception as e:
+        res = {'ok': False, 'stage': 'error', 'error': str(e)}
+    state.update(res or {'stage': 'error'})
+    state['finished_at'] = time.time()
+
+
+@app.route('/api/eda/accounts/<name>/plus-3ds-open', methods=['POST'])
+def api_eda_plus_3ds_open(name):
+    """Открыть challenge-страницу 3DS в Chrome и запустить фоновое ожидание."""
+    d = request.get_json(silent=True) or {}
+    purchase_token = str(d.get('purchase_token', '') or '')
+    invoice_id = str(d.get('invoice_id', '') or '')
+    if not purchase_token:
+        return jsonify({'ok': False, 'error': 'Нет purchase_token'})
+    with PLUS_3DS_LOCK:
+        cur = PLUS_3DS_TASKS.get(name) or {}
+        if (cur.get('stage') in ('3ds', 'opening')
+                and time.time() - (cur.get('opened_at') or 0) < 600):
+            return jsonify({'ok': True, 'stage': '3ds',
+                            'challenge_url': cur.get('challenge_url', ''),
+                            'already_running': True})
+    acc = eda.get_eda_account(name)
+    csrf = ''
+    try:
+        csrf = eda.plus_csrf(acc)
+    except Exception as e:
+        csrf = ''
+    ch = {}
+    try:
+        ch = eda.plus_3ds_challenge(acc, purchase_token, csrf=csrf)
+    except Exception as e:
+        ch = {'error': str(e)}
+    challenge_url = str(d.get('challenge_url', '') or ch.get('challenge_url', '') or '')
+    if not challenge_url:
+        return jsonify({'ok': False, 'error': 'Не удалось получить '
+                                              'challenge_url 3DS'})
+    state = {'stage': 'opening', 'purchase_token': purchase_token,
+             'invoice_id': invoice_id, 'challenge_url': challenge_url,
+             'opened_at': time.time()}
+    with PLUS_3DS_LOCK:
+        PLUS_3DS_TASKS[name] = state
+    threading.Thread(target=_plus_3ds_worker,
+                     args=(name, purchase_token, invoice_id,
+                           challenge_url, csrf), daemon=True).start()
+    return jsonify({'ok': True, 'stage': '3ds',
+                    'challenge_url': challenge_url})
+
+
+@app.route('/api/eda/accounts/<name>/plus-3ds-status')
+def api_eda_plus_3ds_status(name):
+    with PLUS_3DS_LOCK:
+        st = dict(PLUS_3DS_TASKS.get(name) or {})
+    return jsonify(st or {'stage': 'idle'})
+
+
+# Проверка живости токенов/сессий всех аккаунтов.
+EDA_CHECK_TASKS = {}
+
+
+@app.route('/api/eda/accounts/check', methods=['POST'])
+def api_eda_accounts_check():
+    task_id = hashlib.md5(os.urandom(16)).hexdigest()[:12]
+    with _SP_LOCK:
+        EDA_CHECK_TASKS[task_id] = {'state': 'running', 'progress': 0, 'message': 'Запуск…', 'result': None}
+
+    def _run():
+        try:
+            reports = eda.check_eda_accounts(progress=lambda m, f: _progress(task_id, m, f))
+            with _SP_LOCK:
+                EDA_CHECK_TASKS[task_id]['state'] = 'done'
+                EDA_CHECK_TASKS[task_id]['progress'] = 100
+                EDA_CHECK_TASKS[task_id]['message'] = 'Готово'
+                EDA_CHECK_TASKS[task_id]['result'] = reports
+        except Exception as e:
+            with _SP_LOCK:
+                EDA_CHECK_TASKS[task_id]['state'] = 'error'
+                EDA_CHECK_TASKS[task_id]['message'] = str(e)
+                EDA_CHECK_TASKS[task_id]['result'] = None
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'task_id': task_id})
+
+
+def _progress(task_id, msg, frac):
+    with _SP_LOCK:
+        t = EDA_CHECK_TASKS.get(task_id)
+        if t:
+            t['progress'] = int(frac * 100)
+            t['message'] = msg
+
+
+@app.route('/api/eda/accounts/check/<task_id>', methods=['GET'])
+def api_eda_accounts_check_status(task_id):
+    with _SP_LOCK:
+        t = EDA_CHECK_TASKS.get(task_id)
+    if not t:
+        return jsonify({'error': 'task not found'}), 404
+    return jsonify(t)
+
+
+# Промо-задачи: {task_id: {state, progress, message, result}}
+PROMO_TASKS = {}
+_PROMO_LOCK = threading.Lock()
+
+
+@app.route('/api/eda/promos', methods=['POST'])
+def api_eda_promos():
+    """Чекер промокодов: по всем аккаунтам Я.Еды (в фоне, с прогрессом).
+
+    Собирает баннеры главного экрана, личный список и промо-информеры
+    ресторанов (вкладка «Еда» в Яндекс Go). max_restaurants — сколько
+    ресторанов обойти (0 — только баннеры и личный список).
+    """
+    data = request.get_json(silent=True) or {}
+    names = data.get('names') or None
+    max_restaurants = int(data.get('max_restaurants') or 1)
+    task_id = hashlib.md5(os.urandom(16)).hexdigest()[:12]
+    with _PROMO_LOCK:
+        PROMO_TASKS[task_id] = {'state': 'running', 'progress': 0, 'message': 'Запуск…', 'result': None}
+
+    def _run():
+        try:
+            accounts = eda.load_eda_accounts()
+            if names:
+                accounts = [a for a in accounts if a.get('name') in names]
+            result = []
+            total = max(len(accounts), 1)
+            for idx, a in enumerate(accounts):
+                acc_progress = {'frac': 0.0, 'msg': ''}
+
+                def _cb(msg, frac, _idx=idx, _a=a, _acc_progress=acc_progress):
+                    _acc_progress['frac'] = frac
+                    _acc_progress['msg'] = msg
+                    pct = int(((_idx + frac) / total) * 100)
+                    with _PROMO_LOCK:
+                        t = PROMO_TASKS[task_id]
+                        t['progress'] = pct
+                        t['message'] = f'{_a.get("name")}: {msg}'
+
+                try:
+                    r = eda.find_promocodes(a, progress=_cb,
+                                            max_restaurants=max_restaurants)
+                except Exception as e:
+                    r = {'codes': [], 'error': str(e)}
+                result.append({'name': a.get('name'), **r})
+            with _PROMO_LOCK:
+                PROMO_TASKS[task_id]['state'] = 'done'
+                PROMO_TASKS[task_id]['progress'] = 100
+                PROMO_TASKS[task_id]['message'] = 'Готово'
+                PROMO_TASKS[task_id]['result'] = result
+        except Exception as e:
+            with _PROMO_LOCK:
+                PROMO_TASKS[task_id]['state'] = 'error'
+                PROMO_TASKS[task_id]['message'] = str(e)
+                PROMO_TASKS[task_id]['result'] = None
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'task_id': task_id})
+
+
+@app.route('/api/eda/promos/<task_id>', methods=['GET'])
+def api_eda_promos_status(task_id):
+    with _PROMO_LOCK:
+        t = PROMO_TASKS.get(task_id)
+    if not t:
+        return jsonify({'error': 'task not found'}), 404
+    return jsonify({'state': t['state'], 'progress': t['progress'],
+                    'message': t['message'], 'result': t['result']})
+
+
+# Задачи сбора «Свои Плюсы» (ежедневные подарки).
+SP_TASKS = {}
+_SP_LOCK = threading.Lock()
+
+
+@app.route('/api/sp/daily', methods=['POST'])
+def api_sp_daily():
+    """Собрать ежедневные подарки «Свои Плюсы» по аккаунтам с Session_id."""
+    data = request.get_json(silent=True) or {}
+    names = data.get('names') or None
+    claim = bool(data.get('claim', False))
+    task_id = hashlib.md5(os.urandom(16)).hexdigest()[:12]
+    with _SP_LOCK:
+        SP_TASKS[task_id] = {'state': 'running', 'progress': 0, 'message': 'Запуск…', 'result': None}
+
+    def _run():
+        try:
+            accounts = eda.load_eda_accounts()
+            if names:
+                accounts = [a for a in accounts if a.get('name') in names]
+            accounts = [a for a in accounts if eda.sp_session_id(a)]
+            result = []
+            total = max(len(accounts), 1)
+            for idx, a in enumerate(accounts):
+                acc_progress = {'frac': 0.0, 'msg': ''}
+
+                def _cb(msg, frac, _idx=idx, _a=a, _acc_progress=acc_progress):
+                    _acc_progress['frac'] = frac
+                    _acc_progress['msg'] = msg
+                    pct = int(((_idx + frac) / total) * 100)
+                    with _SP_LOCK:
+                        t = SP_TASKS[task_id]
+                        t['progress'] = pct
+                        t['message'] = f'{_a.get("name")}: {msg}'
+
+                try:
+                    r = eda.collect_sp_daily(a, claim=claim, progress=_cb)
+                except Exception as e:
+                    r = {'rewards': [], 'error': str(e)}
+                if claim:
+                    for rw in r.get('rewards') or []:
+                        if rw.get('promocode') or rw.get('error') or rw.get('status'):
+                            eda.record_sp_gift(a, rw)
+                result.append({'name': a.get('name'), **r})
+            with _SP_LOCK:
+                SP_TASKS[task_id]['state'] = 'done'
+                SP_TASKS[task_id]['progress'] = 100
+                SP_TASKS[task_id]['message'] = 'Готово'
+                SP_TASKS[task_id]['result'] = result
+        except Exception as e:
+            with _SP_LOCK:
+                SP_TASKS[task_id]['state'] = 'error'
+                SP_TASKS[task_id]['message'] = str(e)
+                SP_TASKS[task_id]['result'] = None
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'task_id': task_id})
+
+
+@app.route('/api/sp/daily/<task_id>', methods=['GET'])
+def api_sp_daily_status(task_id):
+    with _SP_LOCK:
+        t = SP_TASKS.get(task_id)
+    if not t:
+        return jsonify({'error': 'task not found'}), 404
+    return jsonify({'state': t['state'], 'progress': t['progress'],
+                    'message': t['message'], 'result': t['result']})
+
+
+@app.route('/api/sp/gifts', methods=['GET'])
+def api_sp_gifts():
+    return jsonify(eda.load_sp_gifts())
+
+
+# Задачи «Колесо Фортуны».
+SP_WHEEL_TASKS = {}
+
+
+@app.route('/api/sp/wheel', methods=['POST'])
+def api_sp_wheel():
+    """Проверить/крутануть Колесо Фортуны по аккаунтам с Session_id."""
+    data = request.get_json(silent=True) or {}
+    names = data.get('names') or None
+    spin = bool(data.get('spin', False))
+    task_id = hashlib.md5(os.urandom(16)).hexdigest()[:12]
+    with _SP_LOCK:
+        SP_WHEEL_TASKS[task_id] = {'state': 'running', 'progress': 0, 'message': 'Запуск…', 'result': None}
+
+    def _run():
+        try:
+            accounts = eda.load_eda_accounts()
+            if names:
+                accounts = [a for a in accounts if a.get('name') in names]
+            accounts = [a for a in accounts if eda.sp_session_id(a)]
+            result = []
+            total = max(len(accounts), 1)
+            for idx, a in enumerate(accounts):
+                acc_progress = {'frac': 0.0, 'msg': ''}
+
+                def _cb(msg, frac, _idx=idx, _a=a, _acc_progress=acc_progress):
+                    _acc_progress['frac'] = frac
+                    _acc_progress['msg'] = msg
+                    pct = int(((_idx + frac) / total) * 100)
+                    with _SP_LOCK:
+                        t = SP_WHEEL_TASKS[task_id]
+                        t['progress'] = pct
+                        t['message'] = f'{_a.get("name")}: {msg}'
+
+                try:
+                    r = eda.collect_sp_wheel(a, spin=spin, progress=_cb)
+                except Exception as e:
+                    r = {'results': [], 'error': str(e)}
+                for res in r.get('results') or []:
+                    if res.get('spun') or res.get('prize') or res.get('error'):
+                        eda.record_sp_wheel(a, res)
+                result.append({'name': a.get('name'), **r})
+            with _SP_LOCK:
+                SP_WHEEL_TASKS[task_id]['state'] = 'done'
+                SP_WHEEL_TASKS[task_id]['progress'] = 100
+                SP_WHEEL_TASKS[task_id]['message'] = 'Готово'
+                SP_WHEEL_TASKS[task_id]['result'] = result
+        except Exception as e:
+            with _SP_LOCK:
+                SP_WHEEL_TASKS[task_id]['state'] = 'error'
+                SP_WHEEL_TASKS[task_id]['message'] = str(e)
+                SP_WHEEL_TASKS[task_id]['result'] = None
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'task_id': task_id})
+
+
+@app.route('/api/sp/wheel/<task_id>', methods=['GET'])
+def api_sp_wheel_status(task_id):
+    with _SP_LOCK:
+        t = SP_WHEEL_TASKS.get(task_id)
+    if not t:
+        return jsonify({'error': 'task not found'}), 404
+    return jsonify({'state': t['state'], 'progress': t['progress'],
+                    'message': t['message'], 'result': t['result']})
+
+
+@app.route('/api/sp/wheel/history', methods=['GET'])
+def api_sp_wheel_history():
+    return jsonify(eda.load_sp_wheel())
+
+
+@app.route('/api/eda/sessions', methods=['GET'])
+def api_eda_sessions_list():
+    return jsonify(eda.load_eda_sessions())
+
+
+@app.route('/api/eda/sessions', methods=['POST'])
+def api_eda_sessions_create():
+    data = request.get_json(silent=True) or {}
+    try:
+        token = eda.create_eda_session(data.get('name', ''), data.get('account', ''),
+                                       int(data.get('hours') or 24))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'token': token,
+                    'url': f'/d/{token}'})
+
+
+@app.route('/api/eda/<token>/sale-key', methods=['GET', 'POST'])
+def api_eda_sale_key(token):
+    """Ключ продажи сессии. GET — получить (создаст, если нет),
+    POST — перегенерировать."""
+    try:
+        eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        if request.method == 'POST':
+            key = eda.regenerate_sale_key(token)
+        else:
+            key = eda.get_sale_key(token)
+        return jsonify({'ok': True, 'sale_key': key})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/activate-key', methods=['POST'])
+def api_activate_key():
+    """Активация ключа (бот продаж → webapp). Принимает {key},
+    возвращает ссылку на сессию. BASE_URL берём из настроек/request.
+    """
+    data = request.get_json(silent=True) or {}
+    base = data.get('base_url') or os.environ.get('PUBLIC_BASE_URL', '')
+    try:
+        res = eda.activate_sale_key(data.get('key'), base,
+                                    user_id=data.get('user_id'))
+    except RuntimeError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 404
+    return jsonify({'ok': True, 'key': data.get('key'), 'session': res})
+
+
+@app.route('/api/eda/warmup', methods=['POST'])
+def api_eda_warmup():
+    """Прогреть аккаунты Еды: зафиксировать device + запустить 22-мин отлёжку.
+
+    Тело: {names?: [..]} — если пусто, греем все аккаунты с токеном.
+    """
+    data = request.get_json(silent=True) or {}
+    names = data.get('names') or None
+    try:
+        res = eda.warmup_eda_accounts(names)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'results': res})
+
+
+@app.route('/api/eda/warmup/<name>', methods=['GET'])
+def api_eda_warmup_status(name):
+    return jsonify({'name': name, 'ready_in': eda.account_ready_in(name)})
+
+
+@app.route('/api/eda/fetch-sid', methods=['GET'])
+def api_eda_fetch_sid():
+    import concurrent.futures
+    force = request.args.get('force', '0') == '1'
+    accounts = eda.load_eda_accounts()
+    if force:
+        with eda._store_lock():
+            store = eda._eda_read()
+            for a in store.get('accounts') or []:
+                a.pop('session_id', None)
+            eda._eda_write(store)
+        accounts = eda.load_eda_accounts()
+    results = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
+        futures = {ex.submit(eda.fetch_session_id, a): a['name'] for a in accounts if a.get('token')}
+        for f in concurrent.futures.as_completed(futures, timeout=60):
+            name = futures[f]
+            try:
+                ok = f.result(timeout=15)
+                results[name] = 'OK' if ok else 'FAIL'
+            except Exception as e:
+                results[name] = f'ERR: {str(e)[:80]}'
+    return jsonify(results)
+
+
+@app.route('/api/eda/debug-sid/<name>', methods=['GET'])
+def api_eda_debug_sid(name):
+    """Debug: show what passport returns for session/create."""
+    acc = eda.get_eda_account(name)
+    if not acc:
+        return jsonify({'error': f'not found: {name}'}), 404
+    bearer = eda._extract_bearer(acc)
+    if not bearer:
+        return jsonify({'error': 'no bearer'})
+    proxies = None
+    proxy_url = (acc.get('proxy') or '').strip()
+    if proxy_url:
+        proxies = {'http': proxy_url, 'https': proxy_url}
+    ua = eda._go_ua(acc)
+    s = requests.Session()
+    s.headers['User-Agent'] = ua
+    s.headers['Accept'] = '*/*'
+    log = {}
+    # 1) desk
+    try:
+        r = s.get('https://passport.yandex.ru/desk?retpath=https://tc.eats.yandex.ru',
+                   timeout=20, proxies=proxies, allow_redirects=True)
+        log['desk_status'] = r.status_code
+        log['desk_url'] = r.url
+        log['desk_cookies'] = [(c.name, c.value[:30]) for c in s.cookies]
+    except Exception as e:
+        return jsonify({'error': f'desk: {e}'})
+    csrf = ''
+    import re as _re
+    m = _re.search(r'__CSRF__\s*=\s*"([^"]+)"', r.text or '') if r.text else None
+    if m:
+        csrf = m.group(1)
+    else:
+        for c in s.cookies:
+            if c.name == '_csrf_token':
+                csrf = c.value
+                break
+    log['csrf'] = csrf[:20] + '...' if csrf else 'NONE'
+    if not csrf:
+        return jsonify(log)
+    # 2) session/create
+    try:
+        r2 = s.post('https://passport.yandex.ru/1/bundle/session/create/',
+                     headers={
+                         'Content-Type': 'application/x-www-form-urlencoded',
+                         'X-CSRF-Token': csrf,
+                         'Authorization': f'OAuth {bearer}',
+                     },
+                     data='retpath=https://eda.yandex.ru',
+                     timeout=20, proxies=proxies, allow_redirects=False)
+        log['create_status'] = r2.status_code
+        log['create_location'] = r2.headers.get('Location', '')[:200]
+        log['create_set_cookie'] = r2.headers.get('Set-Cookie', '')[:300]
+        log['create_body'] = r2.text[:300]
+        log['create_cookies_after'] = [(c.name, c.value[:30]) for c in s.cookies]
+        sid_cookies = [c for c in s.cookies if c.name == 'Session_id']
+        log['session_id_cookies'] = len(sid_cookies)
+        if sid_cookies:
+            log['sid_preview'] = sid_cookies[0].value[:40]
+    except Exception as e:
+        log['create_error'] = str(e)
+    return jsonify(log)
+
+@app.route('/api/eda/set-sid', methods=['POST'])
+def api_eda_set_sid():
+    data = request.get_json(silent=True) or {}
+    name = data.get('name', '')
+    sid = data.get('session_id', '').strip()
+    if not name or not sid:
+        return jsonify({'error': 'need name + session_id'}), 400
+    acc = eda.get_eda_account(name)
+    if not acc:
+        return jsonify({'error': f'not found: {name}'}), 404
+    with eda._store_lock():
+        store = eda._eda_read()
+        for a in store.get('accounts') or []:
+            if a.get('name') == name:
+                a['session_id'] = sid
+                break
+        eda._eda_write(store)
+    acc['session_id'] = sid
+    return jsonify({'ok': True, 'name': name, 'sid_prefix': sid[:30] + '...'})
+
+
+@app.route('/api/eda/test-sbp/<name>', methods=['GET'])
+def api_eda_test_sbp(name):
+    """Quick test: go_checkout via superapp for one account — does SBP appear?"""
+    acc = eda.get_eda_account(name)
+    if not acc:
+        return jsonify({'error': f'account {name} not found'}), 404
+    sid = (acc.get('session_id') or '').strip() or (acc.get('cookies') or {}).get('Session_id', '').strip()
+    yuid = (acc.get('yandexuid') or '').strip()
+    bearer = eda._extract_bearer(acc)
+    info = {
+        'has_session_id': bool(sid),
+        'session_id_prefix': sid[:20] + '...' if sid else '',
+        'has_yandexuid': bool(yuid),
+        'yandexuid': yuid[:20] + '...' if yuid else '',
+        'has_bearer': bool(bearer),
+        'bearer_prefix': bearer[:10] + '...' if bearer else '',
+    }
+    try:
+        d = eda.go_checkout(acc, None, acc.get('address') or {})
+    except Exception as e:
+        info['error'] = str(e)
+        return jsonify(info), 500
+    avail = eda.web_available_payments(d)
+    avail_types = [a.get('type') for a in avail]
+    info['ok'] = True
+    info['available_types'] = avail_types
+    return jsonify(info)
+
+
+@app.route('/api/eda/sessions/<token>', methods=['DELETE'])
+def api_eda_sessions_revoke(token):
+    eda.revoke_eda_session(token)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/eda/sessions/<token>/proxy', methods=['GET'])
+def api_eda_session_proxy_get(token):
+    """Получить прокси сессии."""
+    try:
+        s, acc = eda.get_eda_session_account(token)
+    except Exception:
+        s = None
+    if not s:
+        return jsonify({'error': 'сессия не найдена'}), 404
+    proxy = s.get('proxy') or ''
+    ip = None
+    if proxy:
+        try:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as ex:
+                ip = ex.submit(eda.check_proxy_ip, proxy).result(timeout=12)
+        except Exception:
+            ip = {'ok': False, 'error': 'timeout'}
+    return jsonify({'proxy': proxy, 'ip': ip})
+
+
+@app.route('/api/eda/sessions/<token>/proxy', methods=['POST'])
+def api_eda_session_proxy_set(token):
+    """Установить прокси для сессии."""
+    data = request.get_json(silent=True) or {}
+    proxy = data.get('proxy', '')
+    try:
+        eda.set_eda_session_proxy(token, proxy)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'proxy': proxy})
+
+
+@app.route('/api/eda/proxies', methods=['GET'])
+def api_eda_proxies_list():
+    """Список сохранённых прокси."""
+    return jsonify(eda.load_proxies())
+
+
+@app.route('/api/eda/proxies', methods=['POST'])
+def api_eda_proxies_add():
+    """Добавить прокси в общий пул."""
+    data = request.get_json(silent=True) or {}
+    try:
+        proxies = eda.add_proxy(data.get('name', ''), data.get('url', ''))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'proxies': proxies})
+
+
+@app.route('/api/eda/proxies/<path:url>', methods=['DELETE'])
+def api_eda_proxies_delete(url):
+    """Удалить прокси из пула."""
+    proxies = eda.delete_proxy(url)
+    return jsonify({'ok': True, 'proxies': proxies})
+
+
+@app.route('/api/eda/proxies/check', methods=['POST'])
+def api_eda_proxies_check():
+    """Проверить IP прокси."""
+    data = request.get_json(silent=True) or {}
+    url = data.get('url', '')
+    try:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as ex:
+            result = ex.submit(eda.check_proxy_ip, url).result(timeout=12)
+    except Exception as e:
+        result = {'ok': False, 'error': str(e)[:100]}
+    return jsonify(result)
+
+
+@app.route('/api/prizes')
+def api_prizes():
+    account = request.args.get('account')
+    prizes = core.list_prizes(account)
+    return jsonify(prizes)
+
+
+@app.route('/api/prizes/stats')
+def api_prizes_stats():
+    account = request.args.get('account')
+    return jsonify(core.prize_stats(account))
+
+
+# ---------- admin panel (database-style tables) ----------
+
+@app.route('/api/admin/overview')
+def api_admin_overview():
+    """Сводка для верхней панели: счётчики аккаунтов, призов, купонов, заказов."""
+    accs = core.load_accounts()
+    prizes = core.prize_stats()
+    running = core.runs.running()
+    out = {
+        'accounts': len(accs),
+        'running': len(running),
+        'prizes': prizes.get('count', 0),
+        'games': prizes.get('games', 0),
+    }
+    try:
+        out['coupons'] = len(core.admin_coupons())
+    except Exception:
+        out['coupons'] = None
+    try:
+        import pickup
+        out['orders'] = sum(len(pickup.order_history(a.get('name'), limit=50)) for a in accs)
+    except Exception:
+        out['orders'] = None
+    return jsonify(out)
+
+
+@app.route('/api/admin/accounts')
+def api_admin_accounts():
+    return jsonify(core.account_rows())
+
+
+@app.route('/api/admin/purchases')
+def api_admin_purchases():
+    return jsonify(core.admin_purchases())
+
+
+@app.route('/api/admin/coupons')
+def api_admin_coupons():
+    return jsonify(core.admin_coupons())
+
+
+@app.route('/api/admin/accounts/<name>/coupons')
+def api_admin_account_coupons(name):
+    accs = core.load_accounts()
+    if not any(a.get('name') == name for a in accs):
+        return jsonify({'error': 'not found'}), 404
+    try:
+        import pickup
+        cs = pickup.coupons(name)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    out = []
+    for c in cs:
+        it = (c.get('items') or [{}])[0]
+        out.append({
+            'id': c.get('favoriteId'),
+            'title': c.get('title') or '',
+            'subtitle': c.get('subtitle') or '',
+            'code': (it or {}).get('couponCode') or c.get('favoriteId') or '',
+            'display_type': c.get('displayType'),
+            'discount_value': (it or {}).get('discountValue'),
+            'discount_type': (it or {}).get('discountType'),
+            'expiration_date': c.get('expirationDate'),
+            'image': c.get('smallImageUrl') or c.get('largeImageUrl') or c.get('promoImageUrl') or '',
+        })
+    return jsonify({'ok': True, 'coupons': out})
+
+
+# ---------- access sessions (pickup for third parties) ----------
+
+@app.route('/api/sessions', methods=['GET'])
+def api_sessions_list():
+    return jsonify(core.load_sessions())
+
+
+@app.route('/api/sessions', methods=['POST'])
+def api_sessions_create():
+    d = request.get_json(force=True)
+    try:
+        token = core.create_session(str(d.get('name', '')).strip(),
+                                    str(d.get('account', '')).strip(),
+                                    int(d.get('hours', 24)),
+                                    str(d.get('mode', 'both')).strip())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'token': token,
+                    'link': f'http://{request.host}/p/{token}'})
+
+
+@app.route('/api/sessions/<token>', methods=['DELETE'])
+def api_sessions_revoke(token):
+    return jsonify({'ok': True, 'revoked': core.revoke_session(token)})
+
+
+@app.route('/api/coupons/shares', methods=['GET'])
+def api_coupon_shares_list():
+    shares = core.list_coupon_shares()
+    by_account = {}
+    for token, s in shares.items():
+        by_account.setdefault(s.get('account'), []).append((token, s))
+    out = []
+    for account, items in by_account.items():
+        titles = {}
+        try:
+            for c in pickup.coupons(account):
+                titles[c.get('favoriteId')] = c.get('title') or ''
+                for it in (c.get('items') or []):
+                    if it.get('couponCode'):
+                        titles.setdefault(it['couponCode'], c.get('title') or '')
+        except Exception:
+            pass
+        for token, s in items:
+            out.append({
+                'token': token,
+                'name': s.get('name') or '',
+                'account': s.get('account'),
+                'coupon_id': s.get('coupon_id'),
+                'title': titles.get(s.get('coupon_id')) or '',
+                'created_at': s.get('created_at'),
+                'expires_at': s.get('expires_at'),
+                'active': s.get('active'),
+                'link': f'http://{request.host}/c/{token}',
+            })
+    out.sort(key=lambda x: (x.get('expires_at') or ''), reverse=True)
+    return jsonify(out)
+
+
+@app.route('/api/coupons/shares', methods=['POST'])
+def api_coupon_shares_create():
+    d = request.get_json(force=True)
+    try:
+        token = core.create_coupon_share(str(d.get('account', '')).strip(),
+                                         str(d.get('coupon_id', '')).strip(),
+                                         int(d.get('hours', 24)),
+                                         str(d.get('name', '')).strip())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'token': token,
+                    'link': f'http://{request.host}/c/{token}'})
+
+
+@app.route('/api/coupons/shares/<token>', methods=['DELETE'])
+def api_coupon_shares_revoke(token):
+    return jsonify({'ok': True, 'revoked': core.revoke_coupon_share(token)})
+
+
+@app.route('/api/coupons/shares/<token>/data')
+def api_coupon_share_data(token):
+    s = core.get_coupon_share(token)
+    if not s:
+        return jsonify({'error': 'Ссылка недействительна или истекла'}), 404
+    try:
+        coupon = pickup.coupon_by_id(s['account'], s['coupon_id'])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    if not coupon:
+        return jsonify({'error': 'Купон не найден на аккаунте'}), 404
+    return jsonify({'ok': True, 'share': s, 'coupon': coupon})
+
+
+@app.route('/c/<token>')
+def coupon_page(token):
+    s = core.get_coupon_share(token)
+    if not s:
+        return render_template('coupon.html', invalid=True, token=token), 404
+    return render_template('coupon.html', invalid=False, token=token)
+
+
+@app.route('/api/sessions/detailed')
+def api_sessions_detailed():
+    """Админ-панель: активные сессии с данными пользователя
+    (баланс, купоны, промокоды, активные заказы, история покупок)."""
+    sess = core.load_sessions()
+    out = []
+    for token, s in sess.items():
+        if not s.get('active'):
+            continue
+        item = {
+            'token': token,
+            'name': s.get('name'),
+            'account': s.get('account'),
+            'mode': s.get('mode') or 'both',
+            'created_at': s.get('created_at'),
+            'expires_at': s.get('expires_at'),
+            'last_seen': s.get('last_seen'),
+            'link': f'http://{request.host}/p/{token}',
+        }
+        try:
+            item['orders_active'] = pickup.active_orders(s['account'])
+        except Exception as e:
+            item['orders_active'] = None
+            item['orders_active_err'] = str(e)
+        try:
+            item['orders_history'] = pickup.order_history(s['account'])
+        except Exception as e:
+            item['orders_history'] = None
+            item['orders_history_err'] = str(e)
+        try:
+            item['balance'] = pickup.user_balance(s['account'])
+        except Exception as e:
+            item['balance'] = {'ok': False, 'error': str(e)}
+        try:
+            item['promos'] = pickup.express_promos(s['account'])
+        except Exception as e:
+            item['promos'] = None
+            item['promos_err'] = str(e)
+        try:
+            item['coupons'] = pickup.coupons(s['account'])
+        except Exception as e:
+            item['coupons'] = None
+            item['coupons_err'] = str(e)
+        out.append(item)
+    return jsonify(out)
+
+
+def pickup_session(token):
+    """Возвращает session dict либо бросает RuntimeError."""
+    s = core.get_session(token)
+    if not s:
+        raise RuntimeError('сессия не найдена, истекла или отозвана')
+    core.touch_session(token)
+    return s
+
+
+@app.route('/p/<token>')
+def client_page(token):
+    if not core.get_session(token):
+        return render_template('client.html', invalid=True), 403
+    return render_template('client.html', invalid=False)
+
+
+@app.route('/api/pickup/<token>/info')
+def api_pickup_info(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    return jsonify({'name': s['name'], 'account': s['account'],
+                    'expires_at': s['expires_at'],
+                    'mode': s.get('mode') or 'both'})
+
+
+@app.route('/api/pickup/<token>/card')
+def api_pickup_card(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        data = pickup.card_qr(s['account'])
+        data['balance'] = pickup.user_balance(s['account'])
+        return jsonify({'ok': True, **data})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/card')
+def api_card():
+    """Админ: бонусная карта аккаунта (QR, код, баланс) по ?account=."""
+    account = (request.args.get('account') or '').strip()
+    if not account:
+        return jsonify({'error': 'account required'}), 400
+    try:
+        data = pickup.card_qr(account)
+        data['balance'] = pickup.user_balance(account)
+        return jsonify({'ok': True, **data})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/city')
+def api_pickup_city(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'city': pickup.current_city(s['account'])})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/cities')
+def api_pickup_cities(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'cities': pickup.search_cities(
+            s['account'], query=request.args.get('query', ''))})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/cart')
+def api_pickup_cart(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        dt = request.args.get('delivery_type', 'pickup')
+        sc = request.args.get('store_code')
+        cart = pickup.cart(s['account'], delivery_type=dt, store_code=sc)
+        for c in cart.get('carts', []):
+            pickup.enrich_cart(s['account'], c)
+        return jsonify({'ok': True, 'cart': cart})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/stores')
+def api_pickup_stores(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'stores': pickup.search_stores(
+            s['account'],
+            query=request.args.get('query', ''),
+            city_fias_id=request.args.get('city_fias_id'),
+            delivery_type=request.args.get('delivery_type', 'pickup'))})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/store')
+def api_pickup_store(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'store': pickup.store_detail(
+            s['account'], request.args.get('store_code'))})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/delivery/store')
+def api_pickup_delivery_store(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'store': pickup.delivery_store(
+            s['account'], request.args.get('address_id'),
+            city_fias_id=request.args.get('city_fias_id'))})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/categories')
+def api_pickup_categories(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'categories': pickup.categories(
+            s['account'], request.args.get('store_code'))})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/catalog')
+def api_pickup_catalog(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        cat = request.args.get('category_id')
+        cids = request.args.get('category_ids')
+        cids = [c for c in (cids or '').split(',') if c.isdigit()]
+        return jsonify({'ok': True, 'catalog': pickup.goods(
+            s['account'], request.args.get('store_code'),
+            category_id=int(cat) if cat and cat.isdigit() else None,
+            category_ids=cids or None,
+            term=request.args.get('term') or None,
+            offset=int(request.args.get('offset', 0)),
+            sort_type=request.args.get('sort', 'popularity'),
+            sort_order=request.args.get('order', 'desc'))})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/cart', methods=['POST'])
+def api_pickup_cart_add(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        d = request.get_json(force=True)
+        dt = d.get('delivery_type', 'pickup')
+        c = pickup.add_to_cart(s['account'], d.get('store_code'), d.get('items', []),
+                               delivery_type=dt)
+        if c.get('id'):
+            pickup.enrich_cart(s['account'], c)
+        return jsonify({'ok': True, 'cart': c})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/cart/item', methods=['DELETE'])
+def api_pickup_cart_item_delete(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        d = request.get_json(force=True)
+        dt = d.get('delivery_type', 'pickup')
+        c = pickup.remove_from_cart(s['account'], d.get('store_code'),
+                                    d.get('good_id'), d.get('catalog_price'),
+                                    qnty=d.get('qnty', 0), weight_step=d.get('weight_step'),
+                                    delivery_type=dt)
+        if c.get('id'):
+            pickup.enrich_cart(s['account'], c)
+        return jsonify({'ok': True, 'cart': c})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/checkout')
+def api_pickup_checkout(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'checkout': pickup.checkout_info(
+            s['account'], request.args.get('cart_id'), request.args.get('store_code'),
+            delivery_type=request.args.get('delivery_type', 'pickup'),
+            address_id=request.args.get('address_id'))})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/checkout/preview')
+def api_pickup_checkout_preview(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'preview': pickup.checkout_preview(
+            s['account'], request.args.get('store_code'),
+            delivery_type=request.args.get('delivery_type', 'pickup'),
+            address_id=request.args.get('address_id'))})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/checkout/bonus', methods=['POST'])
+def api_pickup_checkout_bonus(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        d = request.get_json(force=True)
+        return jsonify({'ok': True, 'checkout': pickup.set_bonus_points(
+            s['account'], d.get('cart_id'), d.get('is_writeoff', False),
+            store_code=d.get('store_code'),
+            delivery_type=d.get('delivery_type', 'pickup'),
+            address_id=d.get('address_id'))})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/promos')
+def api_pickup_promos(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'promocodes': pickup.promo_codes(s['account'])})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/checkout/promo', methods=['POST'])
+def api_pickup_checkout_promo(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        d = request.get_json(force=True)
+        return jsonify({'ok': True, 'result': pickup.check_promo(
+            s['account'], d.get('cart_id'), d.get('store_code'), d.get('promo_code'),
+            delivery_type=d.get('delivery_type', 'pickup'),
+            address_id=d.get('address_id'))})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/checkout/promo/apply', methods=['POST'])
+def api_pickup_checkout_promo_apply(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        d = request.get_json(force=True)
+        preview = pickup.apply_promo(
+            s['account'], d.get('promo_code'),
+            store_code=d.get('store_code'),
+            delivery_type=d.get('delivery_type', 'pickup'),
+            address_id=d.get('address_id'))
+        return jsonify({'ok': True, 'preview': preview})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/payment/methods')
+def api_pickup_payment_methods(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'methods': pickup.payment_methods(s['account'])})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/payment/bind', methods=['POST'])
+def api_pickup_payment_bind(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'bind': pickup.bind_card(s['account'])})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/addresses')
+def api_pickup_addresses(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'addresses': pickup.addresses(s['account'])})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/address', methods=['POST'])
+def api_pickup_address_create(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        d = request.get_json(force=True)
+        return jsonify({'ok': True, 'address': pickup.create_address(
+            s['account'], d.get('locality'), d.get('street'), d.get('house'),
+            d.get('latitude'), d.get('longitude'),
+            apartment=d.get('apartment'), entrance=d.get('entrance'),
+            floor=d.get('floor'), door_phone=d.get('door_phone'),
+            comment=d.get('comment'), district=d.get('district'),
+            province=d.get('province', ''), country=d.get('country', 'RU'),
+            is_active=d.get('is_active', True))})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/address/activate', methods=['POST'])
+def api_pickup_address_activate(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        d = request.get_json(force=True)
+        pickup.set_active_address(s['account'], d.get('address_id'))
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/order', methods=['POST'])
+def api_pickup_order(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        d = request.get_json(force=True)
+        return jsonify({'ok': True, 'order': pickup.place_order(
+            s['account'],
+            d.get('cart_id'),
+            d.get('store_code'),
+            d.get('from'),
+            d.get('to'),
+            customer=d.get('customer'),
+            payment=d.get('payment', 'StoreOffline'),
+            replacement=d.get('replacement', 'REPLACE_GOODS'),
+            promo_code=d.get('promo_code'),
+            delivery_type=d.get('delivery_type', 'pickup'),
+            address_id=d.get('address_id'))})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/order/<number>')
+def api_pickup_order_info(token, number):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'order': pickup.order_info(s['account'], number)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/orders/active')
+def api_pickup_active_orders(token):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'orders': pickup.active_orders(s['account'])})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pickup/<token>/order/<number>/cancel', methods=['POST'])
+def api_pickup_cancel_order(token, number):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        reason = (request.get_json(silent=True) or {}).get('reason', 'another_reason')
+        pickup.cancel_order(s['account'], number, reason)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/p/<token>/order/<number>')
+def api_pickup_order_page(token, number):
+    try:
+        s = pickup_session(token)
+    except RuntimeError as e:
+        return render_template('client.html', invalid=True), 403
+    try:
+        order = pickup.order_info(s['account'], number)
+        status = order.get('status', {})
+        status_code = status.get('code', 'UNKNOWN')
+        status_text = status.get('text', '')
+        status_name = status.get('name', '')
+        shop = order.get('shop', {})
+        di = order.get('deliveryTimeInterval', {})
+        items = order.get('items', [])
+        summary = order.get('summary', {})
+        header = summary.get('header', {})
+        spending = summary.get('spending', [])
+        discount = 0
+        for sp in spending:
+            for child in sp.get('children', []):
+                if child.get('isSaving'):
+                    discount += child.get('value', 0)
+        old_total = order.get('oldTotalPrice', header.get('value', 0))
+        total = order.get('totalPrice', header.get('value', 0))
+        discount_total = order.get('discountTotalPrice', discount)
+        pay = order.get('payment', {})
+        pay_type = pay.get('type', {}) if pay else {}
+        pay_method = pay_type.get('text', 'На кассе')
+        pay_badge = pay_type.get('system', 'cash')
+        if pay_badge == 'cash':
+            pay_badge = '💵'
+        elif pay_badge == 'card':
+            pay_badge = '💳'
+        else:
+            pay_badge = '💳'
+        if status_code in ('NEW', 'ASSEMBLING', 'ON_ASSEMBLE'):
+            stage_state = 'active'
+        elif status_code in ('READY', 'WAITING', 'DELIVERED', 'PICKED_UP'):
+            stage_state = 'done'
+        else:
+            stage_state = 'pending'
+        stages = [
+            {'state': 'done', 'dot': '✓', 'title': 'Принят', 'time': 'Оформлен', 'desc': 'Заказ подтверждён магазином'},
+            {'state': 'done' if status_code not in ('NEW','ASSEMBLING','ON_ASSEMBLE') else stage_state, 'dot': '📦', 'title': 'Сборка', 'time': status_name, 'desc': status_text, 'progress': 75 if status_code in ('NEW','ASSEMBLING','ON_ASSEMBLE') else None},
+            {'state': 'active' if status_code in ('READY','WAITING') else 'done' if status_code in ('DELIVERED','PICKED_UP') else 'pending', 'dot': '✓', 'title': 'Готов к выдаче', 'time': status_name if status_code in ('READY','WAITING') else 'Ожидается', 'desc': status_text if status_code in ('READY','WAITING') else 'Заказ будет готов в указанном слоте'},
+            {'state': 'pending', 'dot': '🤝', 'title': 'Выдан', 'time': 'Ожидается', 'desc': 'Покажите код при получении'},
+        ]
+        from datetime import datetime
+        created_at = ''
+        try:
+            created_at = datetime.fromisoformat(order.get('createdAt', '')).strftime('%d %b %Y, %H:%M')
+        except Exception:
+            created_at = order.get('createdAt', '')
+        return render_template('order.html',
+            order=order,
+            order_id=order.get('orderId', number),
+            created_at=created_at,
+            status_badge='✅ Оплачен' if pay else '⏳ Ожидает',
+            status_code=status_code,
+            status_text=status_text,
+            stages=stages,
+            shop_name=shop.get('format', 'Магнит'),
+            shop_address=order.get('formattedAddress', ''),
+            shop_distance='1.2 км',
+            shop_hours='09:00–22:00',
+            slot_time=di.get('from', '')[11:16] + ' – ' + (di.get('to', '')[11:16] if di.get('to') else ''),
+            slot_date=datetime.fromisoformat(di.get('from', '')[:10]).strftime('%d %B %Y') if di.get('from') else '',
+            items_count=len(items),
+            items=items,
+            formatted_old_total=order.get('formattedOldTotalPrice', ''),
+            formatted_discount=order.get('formattedDiscountTotalPrice', ''),
+            formatted_total=order.get('formattedTotalPrice', ''),
+            discount_total=discount_total,
+            pay_method_badge=pay_badge,
+            pay_method_label=pay_method,
+            pay_status='Оплачено' if pay else 'Ожидает оплаты',
+            barcode=order.get('delivery', {}).get('orderBarcode', order.get('delivery', {}).get('pvzCode', '')),
+            can_cancel=(order.get('availableActions', {}) or {}).get('canCancelOrder', False),
+            token=token,
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------- Яндекс Еда: клиент доставки ----------
+
+@app.route('/d/<token>')
+def eda_client_page(token):
+    s = eda.get_eda_session(token)
+    if not s:
+        return render_template('eda.html', invalid=True), 403
+    return render_template('eda.html', token=token, invalid=False)
+
+
+def eda_session(token):
+    sess, acc = eda.get_eda_session_account(token)
+    if not sess:
+        raise RuntimeError('сессия не найдена, истекла или отозвана')
+    if acc is None:
+        raise RuntimeError('аккаунт сессии не найден')
+    eda.touch_eda_session(token)
+    s = dict(sess)
+    s['account'] = acc
+    s['account_name'] = sess.get('account', '')
+    return s
+
+
+@app.route('/api/eda/<token>/info')
+def api_eda_info(token):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    return jsonify({'name': s['name'], 'account': s['account_name'],
+                    'expires_at': s['expires_at'],
+                    'promo_ready_in': eda.promo_ready_in(token),
+                    'promo_ready_at': s.get('promo_ready_at'),
+                    'addr': s.get('address')})
+
+
+@app.route('/api/eda/<token>/address', methods=['GET', 'POST'])
+def api_eda_address(token):
+    """Чтение/сохранение адреса доставки выбранного в сессии."""
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    if request.method == 'GET':
+        return jsonify({'ok': True, 'addr': s.get('address')})
+    data = request.get_json(silent=True) or {}
+    addr_input = data.get('address')
+    print(f'[ADDR] token={token[:12]}... addr={addr_input}', flush=True)
+    try:
+        addr = eda.set_eda_session_address(token, addr_input)
+        print(f'[ADDR] saved ok: {addr}', flush=True)
+        return jsonify({'ok': True, 'addr': addr})
+    except Exception as e:
+        print(f'[ADDR] ERR: {e}', flush=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/plus')
+def api_eda_plus(token):
+    """Реальный баланс и статус Я.Плюс аккаунта сессии.
+
+    Возвращает {ok, plus: {balance, currency, status}}. Сохраняет баланс
+    в конфиг аккаунта (plus_balance), чтобы его видел админка/автозаказ.
+    """
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        pb = eda.plus_balance(s['account'])
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    try:
+        eda.set_plus_balance(s['account_name'], pb.get('balance'),
+                             pb.get('status'))
+    except Exception:
+        pass
+    return jsonify({'ok': True, 'plus': pb})
+
+
+@app.route('/api/eda/<token>/profile')
+def api_eda_profile(token):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'profile': eda.profile(s['account'])})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/restaurants')
+def api_eda_restaurants(token):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        q = request.args.get('query', '')
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        return jsonify({'ok': True, 'restaurants': eda.search_restaurants(
+            s['account'], query=q, lat=lat, lon=lon)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/restaurants/<rid>')
+def api_eda_menu(token, rid):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        return jsonify({'ok': True, 'menu': eda.restaurant_menu(
+            s['account'], rid, lat=lat, lon=lon)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/layout')
+def api_eda_layout(token):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        slug = request.args.get('slug')
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        view = {'type': 'collection', 'slug': slug} if slug else None
+        return jsonify({'ok': True, 'layout': eda.layout(
+            s['account'], view=view, lat=lat, lon=lon)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/shop/<slug>/categories')
+def api_eda_shop_categories(token, slug):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'categories': eda.shop_categories(
+            s['account'], slug)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/shop/<slug>/goods', methods=['POST'])
+def api_eda_shop_goods(token, slug):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'ok': True, 'goods': eda.shop_goods(
+            s['account'], slug, data.get('uids') or [])})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/shop/<slug>/category/<uid>')
+def api_eda_shop_category(token, slug, uid):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'category': eda.shop_category(
+            s['account'], slug, uid)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/shop/<slug>/info')
+def api_eda_shop_info(token, slug):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'info': eda.shop_info(s['account'], slug)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/shop/<slug>/search')
+def api_eda_shop_search(token, slug):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        q = request.args.get('query', '')
+        return jsonify({'ok': True, 'search': eda.shop_search(
+            s['account'], slug, q)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/cart')
+def api_eda_cart(token):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        slug = request.args.get('place_slug')
+        return jsonify({'ok': True, 'cart': eda.cart(
+            s['account'], slug=slug, lat=lat, lon=lon)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/cart', methods=['POST'])
+def api_eda_cart_add(token):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'ok': True, 'cart': eda.add_to_cart(
+            s['account'],
+            data.get('place_slug') or data.get('restaurant_id'),
+            data.get('item') or data.get('item_id'),
+            qty=int(data.get('qty') or 1),
+            item_options=data.get('item_options'),
+            lat=data.get('lat'), lon=data.get('lon'),
+            business=data.get('business', 'restaurant'))})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/cart/add-url', methods=['POST'])
+def api_eda_cart_add_url(token):
+    """Add item to cart by Yandex Eda URL.
+    Parses placeSlug, item uuid, resolves to menu_item_id via menu/search."""
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    data = request.get_json(silent=True) or {}
+    url = data.get('url', '')
+    qty = int(data.get('qty') or 1)
+    if not url:
+        return jsonify({'error': 'url required'}), 400
+    try:
+        from urllib.parse import urlparse, parse_qs
+        u = urlparse(url)
+        qs = parse_qs(u.query)
+        slug = qs.get('placeSlug', [None])[0] or qs.get('slug', [None])[0]
+        item_uuid = qs.get('item', [None])[0]
+        if not slug or not item_uuid:
+            return jsonify({'error': 'placeSlug и item не найдены в URL'}), 400
+        is_retail = '/retail/' in u.path
+        business = 'shop' if is_retail else 'restaurant'
+        acc = s['account']
+        lat, lon = eda._coords(acc, None, None)
+        # Try to find the item_id by searching the shop
+        item_id = item_uuid
+        try:
+            if is_retail:
+                search_result = eda.shop_search(acc, slug, text=item_uuid[:8])
+                items = search_result if isinstance(search_result, list) else search_result.get('products', search_result.get('items', []))
+                for it in items:
+                    uid = it.get('uid', '') or it.get('id', '')
+                    if str(uid) == item_uuid:
+                        item_id = it.get('id', it.get('menu_item_id', item_uuid))
+                        break
+        except Exception:
+            pass
+        result = eda.add_to_cart(acc, slug, item_id, qty=qty, business=business)
+        cart_data = result.get('cart') if isinstance(result, dict) else result
+        return jsonify({'ok': True, 'cart': cart_data, 'slug': slug, 'item_id': item_id})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/carts')
+def api_eda_carts(token):
+    """Все активные корзины аккаунта (для списка в сессии)."""
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        raw = eda.all_carts(s['account'], lat=lat, lon=lon)
+        carts = []
+        for c in raw.get('carts') or []:
+            place = c.get('place') or {}
+            inner = c.get('cart')
+            if not isinstance(inner, dict):
+                inner = c
+            items = inner.get('items') or []
+            slug = place.get('slug') or c.get('place_slug') or ''
+            total = inner.get('total')
+            if total is None and inner.get('subtotal') is not None:
+                total = inner.get('subtotal')
+            full_items = items
+            biz = c.get('place_business') or 'restaurant'
+            if items and (not items[0].get('name') and not items[0].get('price')):
+                try:
+                    fc = eda.cart(s['account'], slug=slug, lat=lat, lon=lon)
+                    fi = (fc.get('cart') or {}).get('items') or []
+                    if fi:
+                        full_items = fi
+                        if total is None:
+                            t = (fc.get('cart') or {}).get('total') or (fc.get('cart') or {}).get('subtotal')
+                            if t is not None:
+                                total = t
+                except Exception:
+                    pass
+            carts.append({
+                'slug': slug,
+                'place_slug': slug,
+                'place_name': place.get('name') or c.get('place_name') or '',
+                'place_business': biz,
+                'place_icon': c.get('place_icon') or {},
+                'items': full_items,
+                'total': total,
+            })
+        return jsonify({'ok': True, 'carts': carts})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/addresses')
+def api_eda_addresses(token):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'addresses': eda.addresses(s['account'])})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/checkout', methods=['GET', 'POST'])
+def api_eda_checkout(token):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'ok': True, 'checkout': eda.checkout(
+            s['account'],
+            data.get('place_slug'),
+            data.get('address', {}),
+            lat=data.get('lat'), lon=data.get('lon'))})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/cities')
+def api_eda_cities(token):
+    """Города из сохранённых адресов аккаунта сессии (для выбора адреса)."""
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'cities': eda.saved_cities(s['account'])})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/web-checkout', methods=['POST'])
+def api_eda_web_checkout(token):
+    """Оформление супераппом (go-checkout): offers + способы оплаты.
+
+    Возвращает checkout + normalized payment + available + promo_ready_in.
+    """
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    data = request.get_json(silent=True) or {}
+    payment_id = data.get('payment_id') or 'sbp_qr'
+    payment_type = data.get('payment_type') or 'sbp'
+    try:
+        d = None
+        try:
+            d = eda.go_checkout(s['account'], data.get('place_slug'),
+                                data.get('address', {}),
+                                lat=data.get('lat'), lon=data.get('lon'),
+                                payment_id=None, payment_type=None)
+        except Exception:
+            pass
+        if not d:
+            d = eda.mob_checkout(s['account'], data.get('place_slug'),
+                                 data.get('address', {}),
+                                 lat=data.get('lat'), lon=data.get('lon'),
+                                 payment_id=None, payment_type=None)
+        avail = eda.web_available_payments(d)
+        avail = [a for a in avail if a.get('type') != 'add_new_card']
+        offer, pp = eda.web_offer(d, payment_id, payment_type)
+        fallback = False
+        if not offer or not pp:
+            if avail:
+                first = avail[0]
+                offer, pp = eda.web_offer(d, first.get('id') or first.get('type'),
+                                          first.get('type'))
+                fallback = True
+        payment = None
+        if offer and pp:
+            cfc = pp.get('costForCustomer') or {}
+            if isinstance(cfc, dict):
+                cfc = cfc.get('value') or ''
+            request_id = offer.get('requestId') or ''
+            payment = {
+                'id': pp.get('id'), 'type': pp.get('type'),
+                'title': pp.get('title'),
+                'costForCustomer': cfc,
+                'serviceFee': pp.get('serviceFee'),
+                'offer_identity': offer.get('offer_identity'),
+                'requestId': request_id,
+                'cart_id': request_id.split('.')[0] if '.' in request_id else '',
+            }
+        return jsonify({'ok': True, 'checkout': d, 'payment': payment,
+                        'fallback': fallback,
+                        'available': avail,
+                        'promo_ready_in': eda.promo_ready_in(token)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/promocode', methods=['POST'])
+def api_eda_promocode(token):
+    """Применить промокод к корзине (cart/promocode, мобильный флоу «go»).
+
+    Без блокировки по «свежему устройству». При успехе сразу пересчитывает
+    корзину go-checkout и возвращает свежий checkout/payment/available.
+    Причины отказа (например «Не соблюдены условия акции», «У вас уже был
+    первый заказ…») приходят в result.err.
+    """
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    data = request.get_json(silent=True) or {}
+    slug = data.get('place_slug')
+    code = data.get('code')
+    if not slug:
+        return jsonify({'error': 'place_slug обязателен'}), 400
+    if not code:
+        return jsonify({'error': 'code обязателен'}), 400
+    try:
+        out = None
+        try:
+            out = eda.go_promo_apply_checkout(
+                s['account'], slug, code, data.get('address') or {},
+                lat=data.get('lat'), lon=data.get('lon'),
+                payment_id=data.get('payment_id') or 'sbp_qr',
+                payment_type=data.get('payment_type') or 'sbp',
+                offer_identity=data.get('offer_identity'))
+        except Exception:
+            pass
+        if not out:
+            out = eda.mob_promo_apply_checkout(
+                s['account'], slug, code, data.get('address') or {},
+                lat=data.get('lat'), lon=data.get('lon'),
+                payment_id=data.get('payment_id') or 'sbp_qr',
+                payment_type=data.get('payment_type') or 'sbp',
+                offer_identity=data.get('offer_identity'))
+        return jsonify({'ok': True, **out,
+                        'promo_ready_in': eda.promo_ready_in(token)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/payment/methods')
+def api_eda_payment_methods(token):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'methods': eda.payment_methods(s['account'])})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/order', methods=['POST'])
+def api_eda_order_create(token):
+    """Создать заказ супераппом (мобильный WebView, /api/v1/orders)."""
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    data = request.get_json(silent=True) or {}
+    slug = data.get('place_slug')
+    address = data.get('address') or {}
+    if not slug:
+        return jsonify({'error': 'place_slug обязателен'}), 400
+    if not address:
+        return jsonify({'error': 'address обязателен'}), 400
+    payment_id = data.get('payment_id') or 'sbp_qr'
+    payment_type = data.get('payment_type') or 'sbp'
+    spend_plus = data.get('spend_plus')
+    try:
+        res, meta = eda.eda_order_create(
+            s['account'], slug, address,
+            phone=data.get('phone') or '',
+            payment_id=payment_id, payment_type=payment_type,
+            lat=data.get('lat'), lon=data.get('lon'),
+            recently_link_cards=bool(data.get('recently_link_cards'))
+            or payment_id == 'add_new_card',
+            spend_plus=spend_plus,
+        )
+        if not res:
+            if meta.get('code59'):
+                print('EDA ORDER code59', payment_id, 'channel=', meta.get('channel'),
+                      'attempts=', meta.get('attempts'),
+                      'fallback=', meta.get('fallback'),
+                      'fb_offer=', meta.get('fallback_offer'),
+                      'pays=', meta.get('offers_pays'),
+                      'sbp_cfg=', meta.get('sbp_in_config'),
+                      'web_err=', (meta.get('web_error') or '')[:120],
+                      'err=', (meta.get('last_error') or '')[:140])
+                return jsonify({
+                    'error': 'Стоимость доставки изменилась — сумма обновлена, '
+                             'нажмите «Оформить заказ» ещё раз',
+                    'code': 59, 'retry': True,
+                    'checkout': meta.get('_d'),
+                    'payment': meta.get('payment'),
+                    'available': eda.web_available_payments(meta.get('_d') or {}),
+                    'meta': {k: v for k, v in meta.items() if k not in ('_d', 'payment', 'mob_meta')},
+                    'attempts': meta.get('attempts')}), 409
+            print('EDA ORDER unavailable', payment_id, 'channel=', meta.get('channel'),
+                  'pays=', meta.get('offers_pays'),
+                  'sbp_cfg=', meta.get('sbp_in_config'),
+                  'web_err=', (meta.get('web_error') or '')[:120])
+            return jsonify({
+                'error': f'Способ оплаты {payment_id} недоступен для этого заказа',
+                'available': eda.web_available_payments(meta.get('_d') or {}),
+                'offers_pays': meta.get('offers_pays', []),
+                'sbp_in_config': meta.get('sbp_in_config'),
+                'payconfig': eda.payment_config_brief(meta.get('_d') or {})}), 400
+        return jsonify({'ok': True, 'order': res, 'channel': meta.get('channel')})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/order/<oid>/tracking', methods=['POST'])
+def api_eda_order_tracking(token, oid):
+    """Статус оплаты заказа (order/tracking)."""
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        data = request.get_json(silent=True) or {}
+        ch = data.get('channel') or 'mob'
+        if ch == 'go':
+            return jsonify({'ok': True, 'tracking': eda.go_order_tracking(s['account'], oid)})
+        return jsonify({'ok': True, 'tracking': eda.mob_order_tracking(s['account'], oid)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/order/<oid>/qr', methods=['POST'])
+def api_eda_order_qr(token, oid):
+    """QR для СБП: поллит tracking до purchase_token, затем Trust get_payment.
+
+    Канал ('mob'|'web') берётся из тела — для заказов, созданных веб-флоу
+    (оплата на сайте), tracking идёт тем же веб-каналом.
+    """
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        ch = data.get('channel') or 'mob'
+        if ch == 'go':
+            qr = eda.go_sbp_qr(s['account'], oid)
+        elif ch == 'web':
+            qr = eda.web_sbp_qr(s['account'], oid)
+        else:
+            qr = eda.mob_sbp_qr(s['account'], oid)
+        return jsonify({'ok': True, 'qr': qr})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/cards', methods=['GET'])
+def api_eda_session_cards(token):
+    """Сохранённые карты аккаунта сессии (кэш в eda_accounts.json)."""
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    return jsonify({'ok': True, 'cards': eda.eda_cards(s['account'])})
+
+
+@app.route('/api/eda/<token>/cards/refresh', methods=['POST'])
+def api_eda_session_cards_refresh(token):
+    """Обновить карты из Траста (web/payment_methods) и сохранить кэш."""
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        cards = eda.web_payment_methods(s['account'],
+                                        data.get('service_token') or '')
+        eda.eda_save_cards(s['account'], cards)
+        return jsonify({'ok': True, 'cards': cards})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/cards/save', methods=['POST'])
+def api_eda_session_cards_save(token):
+    """Сохранить список карт (id/title/number) в конфиг аккаунта."""
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    data = request.get_json(silent=True) or {}
+    cards = data.get('cards')
+    if not isinstance(cards, list):
+        return jsonify({'error': 'cards обязателен (list)'}), 400
+    try:
+        saved = eda.eda_save_cards(s['account'], cards)
+        return jsonify({'ok': True, 'cards': saved})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/cards/bind', methods=['POST'])
+def api_eda_session_cards_bind(token):
+    """Начать привязку новой карты (Траст web/ create_form_url).
+
+    Тело: {place_slug?, address?, lat?, lon?, service_token?, theme?}.
+    Возвращает {form_url, service_token, integration_profile_id} — форма
+    Траста, где пользователь вводит данные карты и код из SMS.
+    """
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    data = request.get_json(silent=True) or {}
+    service_token = data.get('service_token') or ''
+    try:
+        if not service_token:
+            try:
+                token_v = eda.web_binding_token(eda.web_checkout(
+                    s['account'], data.get('place_slug') or '',
+                    data.get('address') or {},
+                    lat=data.get('lat'), lon=data.get('lon'),
+                    payment_id='sbp_qr', payment_type='sbp'))
+            except Exception:
+                token_v = ''
+            service_token = token_v
+        res = eda.web_bind_form_url(s['account'], service_token=service_token,
+                                    theme=data.get('theme') or 'light')
+        if not (res.get('form_url') or ''):
+            return jsonify({'ok': False, 'error': 'Траст не вернул form_url',
+                            'raw': res}), 502
+        return jsonify({'ok': True, **res})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/orders/active')
+def api_eda_orders_active(token):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'orders': eda.active_orders(s['account'])})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/order/<oid>')
+def api_eda_order_info(token, oid):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        return jsonify({'ok': True, 'order': eda.order_status(s['account'], oid)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/order/<oid>/cancel', methods=['POST'])
+def api_eda_order_cancel(token, oid):
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        eda.cancel_order(s['account'], oid)
+        return jsonify({'ok': True})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------- Автозаказ Я.Еды: работа от имени аккаунта ----------
+
+def eda_account_guard(name):
+    a = eda.get_eda_account(name)
+    if not a:
+        raise RuntimeError(f'аккаунт Я.Еды "{name}" не найден')
+    return a
+
+
+@app.route('/api/eda/autozakaz/accounts')
+def api_eda_az_accounts():
+    """Аккаунты Я.Еды для автозаказа (имя + профиль)."""
+    return jsonify([{'name': a.get('name'), 'profile_name': a.get('profile_name') or '',
+                     'plus_balance': a.get('plus_balance')}
+                    for a in eda.load_eda_accounts()])
+
+
+@app.route('/api/eda/autozakaz/<name>/cities')
+def api_eda_az_cities(name):
+    """Города из сохранённых адресов аккаунта (с адресами)."""
+    try:
+        eda_account_guard(name)
+        return jsonify({'ok': True, 'cities': eda.saved_cities(name)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/autozakaz/<name>/restaurants')
+def api_eda_az_restaurants(name):
+    """Поиск ресторанов/магазинов."""
+    try:
+        eda_account_guard(name)
+        q = request.args.get('query', '')
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        return jsonify({'ok': True, 'restaurants': eda.search_restaurants(
+            name, query=q, lat=lat, lon=lon)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/autozakaz/<name>/menu/<slug>')
+def api_eda_az_menu(name, slug):
+    """Меню ресторана по slug."""
+    try:
+        eda_account_guard(name)
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        return jsonify({'ok': True, 'menu': eda.restaurant_menu(
+            name, slug, lat=lat, lon=lon)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/autozakaz/<name>/cart')
+def api_eda_az_cart(name):
+    """Текущая корзина аккаунта."""
+    try:
+        eda_account_guard(name)
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        slug = request.args.get('place_slug')
+        return jsonify({'ok': True, 'cart': eda.cart(
+            name, slug=slug, lat=lat, lon=lon)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/autozakaz/<name>/cart', methods=['POST'])
+def api_eda_az_cart_add(name):
+    """Добавить товар в корзину."""
+    try:
+        eda_account_guard(name)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 404
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'ok': True, 'cart': eda.add_to_cart(
+            name,
+            data.get('place_slug'),
+            data.get('item_id'),
+            qty=int(data.get('qty') or 1),
+            item_options=data.get('item_options'),
+            lat=data.get('lat'), lon=data.get('lon'),
+            business=data.get('business', 'restaurant'))})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/autozakaz/<name>/checkout', methods=['POST'])
+def api_eda_az_checkout(name):
+    """Оформление: offers со способами оплаты (СБП и др.)."""
+    try:
+        eda_account_guard(name)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 404
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'ok': True, 'checkout': eda.checkout(
+            name,
+            data.get('place_slug'),
+            data.get('address', {}),
+            lat=data.get('lat'), lon=data.get('lon'))})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/autozakaz/<name>/web-checkout', methods=['POST'])
+def api_eda_az_web_checkout(name):
+    """Оформление через веб-флоу (go-checkout).
+
+    Возвращает checkout + normalized payment {id, type, title,
+    costForCustomer, offer_identity, requestId, cart_id} для выбранного
+    способа + available — список доступных способов оплаты.
+    """
+    try:
+        eda_account_guard(name)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 404
+    data = request.get_json(silent=True) or {}
+    payment_id = data.get('payment_id') or 'sbp_qr'
+    payment_type = data.get('payment_type') or 'sbp'
+    try:
+        d = eda.mob_checkout(name, data.get('place_slug'), data.get('address', {}),
+                             lat=data.get('lat'), lon=data.get('lon'),
+                             payment_id=None, payment_type=None)
+        offer, pp = eda.web_offer(d, payment_id, payment_type)
+        fallback = False
+        if not offer or not pp:
+            avail = [a for a in eda.web_available_payments(d)
+                     if a.get('type') != 'add_new_card']
+            if avail:
+                first = avail[0]
+                offer, pp = eda.web_offer(d, first.get('id') or first.get('type'),
+                                          first.get('type'))
+                fallback = True
+        payment = None
+        if offer and pp:
+            cfc = pp.get('costForCustomer') or {}
+            if isinstance(cfc, dict):
+                cfc = cfc.get('value') or ''
+            request_id = offer.get('requestId') or ''
+            payment = {
+                'id': pp.get('id'), 'type': pp.get('type'),
+                'title': pp.get('title'),
+                'costForCustomer': cfc,
+                'serviceFee': pp.get('serviceFee'),
+                'offer_identity': offer.get('offer_identity'),
+                'requestId': request_id,
+                'cart_id': request_id.split('.')[0] if '.' in request_id else '',
+            }
+        return jsonify({'ok': True, 'checkout': d, 'payment': payment,
+                        'fallback': fallback,
+                        'available': eda.web_available_payments(d)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/autozakaz/<name>/promocode', methods=['POST'])
+def api_eda_az_promocode(name):
+    """Применить промокод к корзине (суперапп: POST /api/v2/cart/promocode)."""
+    try:
+        eda_account_guard(name)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 404
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'ok': True, 'result': eda.mob_apply_promocode(
+            name, data.get('place_slug'), data.get('code'),
+            offer_identity=data.get('offer_identity'),
+            lat=data.get('lat'), lon=data.get('lon'),
+            receiving_type=data.get('receiving_type') or 'delivery')})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/autozakaz/<name>/promocodes', methods=['POST'])
+def api_eda_az_promocodes(name):
+    """Промокоды, доступные для корзины (веб: promocodes/checkout)."""
+    try:
+        eda_account_guard(name)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 404
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'ok': True, 'promocodes': eda.web_promocodes(
+            name, data.get('cart_id'),
+            receiving_type=data.get('receiving_type') or 'delivery')})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/autozakaz/<name>/order', methods=['POST'])
+def api_eda_az_order_create(name):
+    """Создать заказ с оплатой СБП (веб: POST /api/v1/orders).
+
+    Сервер пере-запрашивает go-checkout, берёт свежий offer (request_id)
+    и possiblePayment СБП. Тело: {place_slug, address, phone, code?,
+    user_address_id?, lat?, lon?}. Ответ: {ok, order: {orderNr, firstOrder}}.
+    """
+    try:
+        eda_account_guard(name)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 404
+    data = request.get_json(silent=True) or {}
+    slug = data.get('place_slug')
+    address = data.get('address') or {}
+    if not slug:
+        return jsonify({'error': 'place_slug обязателен'}), 400
+    if not address:
+        return jsonify({'error': 'address обязателен'}), 400
+    payment_id = data.get('payment_id') or 'sbp_qr'
+    payment_type = data.get('payment_type') or 'sbp'
+    try:
+        res, meta = eda.mob_order_with_retry(
+            name, slug, address,
+            phone=data.get('phone') or '',
+            payment_id=payment_id, payment_type=payment_type,
+            lat=data.get('lat'), lon=data.get('lon'),
+            recently_link_cards=bool(data.get('recently_link_cards'))
+            or payment_id == 'add_new_card',
+            spend_plus=data.get('spend_plus'),
+        )
+        if not res:
+            if meta.get('code59'):
+                print('AZ ORDER code59', payment_id, 'channel=', 'mob',
+                      'attempts=', meta.get('attempts'),
+                      'pays=', meta.get('offers_pays'),
+                      'sbp_cfg=', meta.get('sbp_in_config'),
+                      'err=', (meta.get('last_error') or '')[:140])
+                return jsonify({
+                    'error': 'Стоимость доставки изменилась — сумма обновлена, '
+                             'нажмите «Оформить заказ» ещё раз',
+                    'code': 59, 'retry': True,
+                    'checkout': meta.get('_d'),
+                    'payment': meta.get('payment'),
+                    'available': eda.web_available_payments(meta.get('_d') or {}),
+                    'meta': {k: v for k, v in meta.items() if k not in ('_d', 'payment')},
+                    'attempts': meta.get('attempts')}), 409
+            print('AZ ORDER unavailable', payment_id, 'channel=', 'mob',
+                  'pays=', meta.get('offers_pays'),
+                  'sbp_cfg=', meta.get('sbp_in_config'))
+            return jsonify({
+                'error': f'Способ оплаты {payment_id} недоступен для этого заказа',
+                'available': eda.web_available_payments(meta.get('_d') or {}),
+                'offers_pays': meta.get('offers_pays', []),
+                'sbp_in_config': meta.get('sbp_in_config')}), 400
+        return jsonify({'ok': True, 'order': res})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/autozakaz/<name>/order/<oid>/tracking', methods=['POST'])
+def api_eda_az_order_tracking(name, oid):
+    """Статус оплаты заказа + данные для QR СБП (order/tracking)."""
+    try:
+        eda_account_guard(name)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 404
+    try:
+        return jsonify({'ok': True, 'tracking': eda.mob_order_tracking(name, oid)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/autozakaz/<name>/order/<oid>/qr', methods=['POST'])
+def api_eda_az_order_qr(name, oid):
+    """QR для СБП: поллит tracking до purchase_token, затем Trust get_payment.
+
+    Ответ: {ok, qr: {order_id, payment, qr_url, purchase_token,
+    service_token}}. qr_url — контент QR (https://qr.nspk.ru/...).
+    """
+    try:
+        eda_account_guard(name)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 404
+    try:
+        return jsonify({'ok': True, 'qr': eda.mob_sbp_qr(name, oid)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/autozakaz/<name>/cards', methods=['GET'])
+def api_eda_az_cards(name):
+    """Сохранённые карты аккаунта (кэш в eda_accounts.json)."""
+    try:
+        eda_account_guard(name)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 404
+    return jsonify({'ok': True, 'cards': eda.eda_cards(name)})
+
+
+@app.route('/api/eda/autozakaz/<name>/cards/refresh', methods=['POST'])
+def api_eda_az_cards_refresh(name):
+    """Обновить карты из Траста (web/payment_methods) и сохранить кэш."""
+    try:
+        eda_account_guard(name)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 404
+    data = request.get_json(silent=True) or {}
+    try:
+        cards = eda.web_payment_methods(name, data.get('service_token') or '')
+        eda.eda_save_cards(name, cards)
+        return jsonify({'ok': True, 'cards': cards})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/autozakaz/<name>/cards/save', methods=['POST'])
+def api_eda_az_cards_save(name):
+    """Сохранить список карт (id/title/number) в конфиг аккаунта."""
+    try:
+        eda_account_guard(name)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 404
+    data = request.get_json(silent=True) or {}
+    cards = data.get('cards')
+    if not isinstance(cards, list):
+        return jsonify({'error': 'cards обязателен (list)'}), 400
+    try:
+        saved = eda.eda_save_cards(name, cards)
+        return jsonify({'ok': True, 'cards': saved})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/autozakaz/<name>/cards/bind', methods=['POST'])
+def api_eda_az_cards_bind(name):
+    """Начать привязку новой карты.
+
+    Тело: {place_slug?, address?, lat?, lon?, service_token?, theme?}.
+    Возвращает {form_url, service_token, integration_profile_id} — форма
+    Траста, где пользователь вводит данные карты и код из SMS. Если
+    service_token не передан, берётся из go-checkout (cardBindingServiceToken).
+    """
+    try:
+        eda_account_guard(name)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 404
+    data = request.get_json(silent=True) or {}
+    service_token = data.get('service_token') or ''
+    try:
+        if not service_token:
+            try:
+                token = eda.web_binding_token(eda.web_checkout(
+                    name, data.get('place_slug') or '', data.get('address') or {},
+                    lat=data.get('lat'), lon=data.get('lon'),
+                    payment_id='sbp_qr', payment_type='sbp'))
+            except Exception:
+                token = ''
+            service_token = token
+        res = eda.web_bind_form_url(name, service_token=service_token,
+                                    theme=data.get('theme') or 'light')
+        if not (res.get('form_url') or ''):
+            return jsonify({'ok': False, 'error': 'Траст не вернул form_url',
+                            'raw': res}), 502
+        return jsonify({'ok': True, **res})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------- Самокат: аккаунты и сессии ----------
+
+@app.route('/api/samokat/accounts')
+def api_samokat_accounts():
+    return jsonify([{'name': a.get('name'),
+                     'added': a.get('added'),
+                     'user': a.get('user') or {},
+                     'token_ok': bool(a.get('access_token')),
+                     'expires': a.get('expires', ''),
+                     'access_expires': a.get('access_token_expires', 0),
+                     'session_token': bool(a.get('session_token'))}
+                    for a in samokat.load_samokat_accounts()])
+
+
+@app.route('/api/samokat/accounts', methods=['POST'])
+def api_samokat_accounts_add():
+    data = request.get_json(silent=True) or {}
+    try:
+        samokat.add_samokat_account(data.get('name', ''), data.get('cookies', ''))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True})
+
+
+@app.route('/api/samokat/sms/send', methods=['POST'])
+def api_samokat_sms_send():
+    data = request.get_json(silent=True) or {}
+    try:
+        samokat.request_sms_code(data.get('phone', ''))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True})
+
+
+@app.route('/api/samokat/sms/confirm', methods=['POST'])
+def api_samokat_sms_confirm():
+    data = request.get_json(silent=True) or {}
+    try:
+        toks, sk_cookies = samokat.confirm_sms_code(data.get('phone', ''), data.get('code', ''))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    try:
+        samokat.add_samokat_account_by_tokens(data.get('name', ''), toks, sk_cookies)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True})
+
+
+@app.route('/api/samokat/accounts/<name>', methods=['DELETE'])
+def api_samokat_accounts_delete(name):
+    samokat.delete_samokat_account(name)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/samokat/accounts/<name>/refresh', methods=['POST'])
+def api_samokat_accounts_refresh(name):
+    try:
+        acc = samokat.refresh_samokat_account(name)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'expires': acc.get('expires'),
+                    'access_expires': acc.get('access_token_expires')})
+
+
+@app.route('/api/samokat/accounts/<name>/profile')
+def api_samokat_profile(name):
+    acc = samokat.get_samokat_account(name)
+    if not acc:
+        return jsonify({'error': 'not found'}), 404
+    try:
+        return jsonify({'ok': True, 'profile': samokat.profile(acc)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/samokat/accounts/<name>/addresses')
+def api_samokat_addresses(name):
+    acc = samokat.get_samokat_account(name)
+    if not acc:
+        return jsonify({'error': 'not found'}), 404
+    try:
+        return jsonify({'ok': True, 'addresses': samokat.addresses(acc)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/samokat/sessions')
+def api_samokat_sessions_list():
+    return jsonify(samokat.load_samokat_sessions())
+
+
+@app.route('/api/samokat/sessions', methods=['POST'])
+def api_samokat_sessions_create():
+    data = request.get_json(silent=True) or {}
+    try:
+        token = samokat.create_samokat_session(data.get('name', ''),
+                                               data.get('account', ''),
+                                               int(data.get('hours', 24)))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'token': token,
+                    'link': f'http://{request.host}/s/{token}'})
+
+
+@app.route('/api/samokat/sessions/<token>', methods=['DELETE'])
+def api_samokat_sessions_revoke(token):
+    samokat.revoke_samokat_session(token)
+    return jsonify({'ok': True})
+
+
+def samokat_session(token):
+    """Возвращает сессию Самоката либо бросает RuntimeError."""
+    s = samokat.get_samokat_session(token)
+    if not s:
+        raise RuntimeError('сессия не найдена, истекла или отозвана')
+    samokat.touch_samokat_session(token)
+    return s
+
+
+@app.route('/s/<token>')
+def samokat_client_page(token):
+    if not samokat.get_samokat_session(token):
+        return render_template('samokat.html', token=token, invalid=True), 403
+    return render_template('samokat.html', token=token, invalid=False)
+
+
+@app.route('/api/samokat/<token>/info')
+def api_samokat_info(token):
+    try:
+        s = samokat_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    return jsonify({'name': s['name'], 'account': s['account'],
+                    'expires_at': s['expires_at']})
+
+
+@app.route('/api/samokat/<token>/profile')
+def api_samokat_client_profile(token):
+    try:
+        s = samokat_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = samokat.get_samokat_account(s['account'])
+    try:
+        return jsonify({'ok': True, 'profile': samokat.profile(acc)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/samokat/<token>/addresses')
+def api_samokat_client_addresses(token):
+    try:
+        s = samokat_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = samokat.get_samokat_account(s['account'])
+    try:
+        return jsonify({'ok': True, 'addresses': samokat.addresses(acc)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/samokat/<token>/showcases')
+def api_samokat_showcases(token):
+    try:
+        s = samokat_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = samokat.get_samokat_account(s['account'])
+    try:
+        return jsonify({'ok': True, 'showcases': samokat.showcase_list(acc)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/samokat/<token>/categories')
+def api_samokat_categories(token):
+    try:
+        s = samokat_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = samokat.get_samokat_account(s['account'])
+    try:
+        return jsonify({'ok': True, 'categories': samokat.categories(
+            acc, request.args.get('showcase_id'))})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/samokat/<token>/catalog')
+def api_samokat_catalog(token):
+    try:
+        s = samokat_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = samokat.get_samokat_account(s['account'])
+    try:
+        return jsonify({'ok': True, 'goods': samokat.goods(
+            acc, request.args.get('showcase_id'),
+            category_id=request.args.get('category_id'),
+            term=request.args.get('term'))})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/samokat/<token>/cart')
+def api_samokat_cart(token):
+    try:
+        s = samokat_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = samokat.get_samokat_account(s['account'])
+    try:
+        return jsonify({'ok': True, 'cart': samokat.cart(acc)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/samokat/<token>/cart/item', methods=['POST'])
+def api_samokat_cart_item(token):
+    try:
+        s = samokat_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = samokat.get_samokat_account(s['account'])
+    d = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'ok': True, 'cart': samokat.set_cart_item(
+            acc, d.get('item'), int(d.get('qty', 1)))})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/samokat/<token>/checkout')
+def api_samokat_checkout(token):
+    try:
+        s = samokat_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = samokat.get_samokat_account(s['account'])
+    try:
+        return jsonify({'ok': True, 'checkout': samokat.checkout_info(acc)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/samokat/<token>/order', methods=['POST'])
+def api_samokat_order(token):
+    try:
+        s = samokat_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = samokat.get_samokat_account(s['account'])
+    d = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'ok': True, 'order': samokat.place_order(
+            acc, d.get('address_id'), slots=d.get('slots'))})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/samokat/<token>/orders')
+def api_samokat_orders(token):
+    try:
+        s = samokat_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = samokat.get_samokat_account(s['account'])
+    try:
+        return jsonify({'ok': True, 'orders': samokat.orders(acc)})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================
+#  Яндекс Маркет: акции «Товар за 1 рубль»
+# ============================================================
+
+MKT_WOW_TASKS = {}
+MKT_WOW_LOCK = threading.Lock()
+
+
+def _mkt_wow_scan_task(accs):
+    """Собрать аккаунты Еды с Session_id в формат Маркета."""
+    result = []
+    for a in accs:
+        sid = (eda.sp_session_id(a) or a.get('session_id') or '').strip()
+        if not sid:
+            continue
+        result.append({
+            'name': a.get('name'),
+            'session_id': sid,
+            'bearer': a.get('bearer', ''),
+            'proxy': a.get('proxy', ''),
+        })
+    return result
+
+
+@app.route('/api/market/wow-offers', methods=['POST'])
+def api_market_wow_offers():
+    """Сканировать аккаунты на наличие акций «Wow Offers» (фон, с логом).
+
+    Возвращает task_id; прогресс/лог — через GET /api/market/wow-offers/status/<id>.
+    """
+    data = request.get_json(silent=True) or {}
+    names = data.get('names') or None
+    workers = int(data.get('workers') or 5)
+    task_id = hashlib.md5(os.urandom(16)).hexdigest()[:12]
+    with MKT_WOW_LOCK:
+        MKT_WOW_TASKS[task_id] = {
+            'state': 'running', 'progress': 0, 'message': 'Запуск…',
+            'log': [], 'result': None,
+        }
+
+    def _run():
+        def _log(msg):
+            with MKT_WOW_LOCK:
+                t = MKT_WOW_TASKS.get(task_id)
+                if not t:
+                    return
+                t['log'] = t['log'] + [{'t': time.strftime('%H:%M:%S'), 'msg': msg}]
+
+        def _cb(msg, frac):
+            with MKT_WOW_LOCK:
+                t = MKT_WOW_TASKS.get(task_id)
+                if not t:
+                    return
+                if frac is None:
+                    t['log'] = t['log'] + [{'t': time.strftime('%H:%M:%S'), 'msg': msg}]
+                else:
+                    t['progress'] = int(frac * 100)
+                    t['message'] = msg
+
+        try:
+            eda_accs = eda.load_eda_accounts()
+            if names:
+                eda_accs = [a for a in eda_accs if a.get('name') in names]
+            mkt_accs = _mkt_wow_scan_task(eda_accs)
+            if not mkt_accs:
+                _log('Нет аккаунтов с Session_id')
+                with MKT_WOW_LOCK:
+                    t = MKT_WOW_TASKS[task_id]
+                    t['state'] = 'done'
+                    t['progress'] = 100
+                    t['message'] = 'Нет аккаунтов с Session_id'
+                    t['result'] = {'total_scanned': 0, 'available_count': 0,
+                                   'available': {}, 'all': {}}
+                return
+
+            _log(f'Всего аккаунтов: {len(mkt_accs)}')
+            scanned = market.scan_all_accounts_wow_offers(mkt_accs,
+                                                           workers=workers,
+                                                           progress=_cb)
+
+            available = {}
+            for name, r in scanned.items():
+                if r.get('has_wow'):
+                    acc = next((a for a in eda_accs if a.get('name') == name), None)
+                    available[name] = {
+                        'has_wow': True,
+                        'checked_at': r.get('checked_at'),
+                        'warmup_at': (acc or {}).get('warmup_at'),
+                        'promo_ready_at': (acc or {}).get('promo_ready_at'),
+                        'device': ((acc or {}).get('device') or {}).get('model', ''),
+                    }
+
+            found_names = list(available.keys())
+            if found_names:
+                _log(f'Найдено акций: {len(found_names)} — {", ".join(found_names)}')
+            else:
+                _log('Акций не найдено')
+
+            with MKT_WOW_LOCK:
+                t = MKT_WOW_TASKS[task_id]
+                t['state'] = 'done'
+                t['progress'] = 100
+                t['message'] = 'Готово'
+                t['result'] = {
+                    'total_scanned': len(scanned),
+                    'available_count': len(available),
+                    'available': available,
+                    'all': scanned,
+                }
+        except Exception as e:
+            _log(f'Ошибка: {e}')
+            with MKT_WOW_LOCK:
+                t = MKT_WOW_TASKS[task_id]
+                t['state'] = 'error'
+                t['message'] = str(e)
+                t['result'] = None
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'ok': True, 'task_id': task_id})
+
+
+@app.route('/api/market/wow-offers/status/<task_id>')
+def api_market_wow_offers_status(task_id):
+    with MKT_WOW_LOCK:
+        t = MKT_WOW_TASKS.get(task_id)
+    if not t:
+        return jsonify({'error': 'task not found'}), 404
+    return jsonify({'state': t['state'], 'progress': t['progress'],
+                    'message': t['message'], 'log': t['log'],
+                    'result': t['result']})
+
+
+@app.route('/api/market/wow-offers/<name>')
+def api_market_wow_offers_account(name):
+    """Сканировать конкретный аккаунт на акции."""
+    try:
+        # Ищем аккаунт в Еде
+        acc = eda.get_eda_account(name)
+        if not acc:
+            return jsonify({'error': f'аккаунт "{name}" не найден'}), 404
+
+        # Конвертируем формат
+        mkt_acc = {
+            'name': name,
+            'session_id': acc.get('session_id', ''),
+            'bearer': acc.get('bearer', ''),
+            'proxy': acc.get('proxy', ''),
+        }
+
+        result = market.scan_account_wow_offers(mkt_acc)
+
+        return jsonify({
+            'ok': True,
+            'account': name,
+            'has_offers': bool(result.get('has_wow')),
+            'result': result,
+            'warmup_at': acc.get('warmup_at'),
+            'promo_ready_at': acc.get('promo_ready_at'),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/market/wow-offers/scan', methods=['POST'])
+def api_market_scan_wow():
+    """Сканировать аккаунт по URL акции."""
+    d = request.get_json(silent=True) or {}
+    name = d.get('account')
+    url = d.get('url', '').strip()
+
+    if not name:
+        return jsonify({'error': 'account обязателен'}), 400
+
+    try:
+        # Ищем аккаунт в Еде
+        acc = eda.get_eda_account(name)
+        if not acc:
+            return jsonify({'error': f'аккаунт "{name}" не найден'}), 404
+
+        # Конвертируем формат
+        mkt_acc = {
+            'name': name,
+            'session_id': acc.get('session_id', ''),
+            'bearer': acc.get('bearer', ''),
+            'proxy': acc.get('proxy', ''),
+        }
+
+        if url:
+            results = market.get_wow_offers_from_url(mkt_acc, url)
+        else:
+            results = market.scan_account_wow_offers(mkt_acc)
+
+        return jsonify({'ok': True, 'account': name,
+                        'has_offers': bool(results.get('has_wow')),
+                        'result': results})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================
+#  Яндекс Маркет: авто-отзывы (UGC) на всех аккаунтах
+# ============================================================
+
+MKT_REVIEW_TASKS = {}
+MKT_REVIEW_LOCK = threading.Lock()
+
+
+@app.route('/api/market/reviews', methods=['POST'])
+def api_market_reviews():
+    """Оставить отзывы на всех аккаунтах (фон, с логом).
+
+    Тело: {text, grade, anonymity, names, dry_run}.
+    Возвращает task_id; прогресс/лог — через GET /api/market/reviews/status/<id>.
+    """
+    data = request.get_json(silent=True) or {}
+    names = data.get('names') or None
+    text = (data.get('text') or '').strip()
+    grade = int(data.get('grade') or 5)
+    anonymity = int(data.get('anonymity') or 0)
+    dry_run = bool(data.get('dry_run'))
+    workers = int(data.get('workers') or 5)
+    task_id = hashlib.md5(os.urandom(16)).hexdigest()[:12]
+    with MKT_REVIEW_LOCK:
+        MKT_REVIEW_TASKS[task_id] = {
+            'state': 'running', 'progress': 0, 'message': 'Запуск…',
+            'log': [], 'result': None,
+        }
+
+    def _run():
+        def _log(msg):
+            with MKT_REVIEW_LOCK:
+                t = MKT_REVIEW_TASKS.get(task_id)
+                if not t:
+                    return
+                t['log'] = t['log'] + [{'t': time.strftime('%H:%M:%S'), 'msg': msg}]
+
+        def _cb(msg, frac):
+            with MKT_REVIEW_LOCK:
+                t = MKT_REVIEW_TASKS.get(task_id)
+                if not t:
+                    return
+                if frac is None:
+                    t['log'] = t['log'] + [{'t': time.strftime('%H:%M:%S'), 'msg': msg}]
+                else:
+                    t['progress'] = int(frac * 100)
+                    t['message'] = msg
+
+        try:
+            eda_accs = eda.load_eda_accounts()
+            if names:
+                eda_accs = [a for a in eda_accs if a.get('name') in names]
+            mkt_accs = _mkt_wow_scan_task(eda_accs)
+            if not mkt_accs:
+                _log('Нет аккаунтов с Session_id')
+                with MKT_REVIEW_LOCK:
+                    t = MKT_REVIEW_TASKS[task_id]
+                    t['state'] = 'done'
+                    t['progress'] = 100
+                    t['message'] = 'Нет аккаунтов с Session_id'
+                    t['result'] = {'total': 0, 'reviewed_count': 0, 'results': {}}
+                return
+
+            _log(f'Всего аккаунтов: {len(mkt_accs)}')
+            results = market.review_all_accounts(mkt_accs, text=text,
+                                                 grade=grade,
+                                                 anonymity=anonymity,
+                                                 workers=workers,
+                                                 progress=_cb,
+                                                 dry_run=dry_run)
+
+            reviewed = 0
+            for name, r in results.items():
+                reviewed += (r or {}).get('reviewed_count', 0) or 0
+
+            _log(f'Отзывов оставлено: {reviewed}')
+
+            with MKT_REVIEW_LOCK:
+                t = MKT_REVIEW_TASKS[task_id]
+                t['state'] = 'done'
+                t['progress'] = 100
+                t['message'] = 'Готово'
+                t['result'] = {
+                    'total': len(results),
+                    'reviewed_count': reviewed,
+                    'results': results,
+                }
+        except Exception as e:
+            _log(f'Ошибка: {e}')
+            with MKT_REVIEW_LOCK:
+                t = MKT_REVIEW_TASKS[task_id]
+                t['state'] = 'error'
+                t['message'] = str(e)
+                t['result'] = None
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'ok': True, 'task_id': task_id})
+
+
+@app.route('/api/market/reviews/status/<task_id>')
+def api_market_reviews_status(task_id):
+    with MKT_REVIEW_LOCK:
+        t = MKT_REVIEW_TASKS.get(task_id)
+    if not t:
+        return jsonify({'error': 'task not found'}), 404
+    return jsonify({'state': t['state'], 'progress': t['progress'],
+                    'message': t['message'], 'log': t['log'],
+                    'result': t['result']})
+
+
+# ---------- Демо-страница ----------
+DEMO_KEY = os.environ.get('DEMO_KEY', 'EDADI-keyvkdv9328629ksdkvsek')
+DEMO_ACCOUNTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'demo_accounts.json')
+
+
+def _load_demo_accounts():
+    try:
+        return json.load(open(DEMO_ACCOUNTS_FILE, encoding='utf-8'))
+    except Exception:
+        return {'accounts': []}
+
+
+def _save_demo_accounts(data):
+    json.dump(data, open(DEMO_ACCOUNTS_FILE, 'w', encoding='utf-8'),
+              ensure_ascii=False, indent=2)
+
+
+@app.route('/demo')
+def page_demo():
+    return render_template('demo.html')
+
+
+@app.route('/api/demo/check', methods=['POST'])
+def api_demo_check():
+    data = request.get_json(silent=True) or {}
+    login = (data.get('login') or '').strip()
+    password = (data.get('password') or '').strip()
+    key = (data.get('key') or '').strip()
+    if not login or not password or not key:
+        return jsonify({'ok': False, 'error': 'Заполните все поля'}), 400
+    db = _load_users()
+    user = next((u for u in db['users'] if u['login'] == login), None)
+    if not user or user['password_hash'] != _hash_pw(password) or user['key'] != key:
+        return jsonify({'ok': False, 'error': 'Неверные данные'}), 403
+    session['demo_auth'] = login
+    return jsonify({'ok': True, 'login': login})
+
+
+@app.route('/api/demo/accounts', methods=['GET'])
+def api_demo_accounts_list():
+    return jsonify(_load_demo_accounts())
+
+
+@app.route('/api/demo/accounts', methods=['POST'])
+def api_demo_accounts_add():
+    data = request.get_json(silent=True) or {}
+    name = data.get('name') or f"demo-{int(time.time())}"
+    acc = {
+        'name': name,
+        'session_id': data.get('session_id', ''),
+        'yandexuid': data.get('yandexuid', ''),
+        'added': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'profile_name': data.get('profile_name', ''),
+        'phone': data.get('phone', ''),
+        'plus_balance': data.get('plus_balance', 0),
+        'plus_status': data.get('plus_status', 'NO_PLUS'),
+        'bonus_earned': data.get('bonus_earned', 700),
+        'device': data.get('device', {}),
+        'demo': True,
+    }
+    db = _load_demo_accounts()
+    db['accounts'].append(acc)
+    _save_demo_accounts(db)
+    return jsonify({'ok': True, 'account': acc})
+
+
+@app.route('/api/demo/accounts/<name>', methods=['DELETE'])
+def api_demo_accounts_delete(name):
+    db = _load_demo_accounts()
+    db['accounts'] = [a for a in db['accounts'] if a.get('name') != name]
+    _save_demo_accounts(db)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/demo/accounts/clear', methods=['POST'])
+def api_demo_accounts_clear():
+    _save_demo_accounts({'accounts': []})
+    return jsonify({'ok': True})
+
+
+# ---------- Пользователи (доступ к курьеру / демо) ----------
+USERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'users.json')
+
+
+def _load_users():
+    try:
+        return json.load(open(USERS_FILE, encoding='utf-8'))
+    except Exception:
+        return {'users': []}
+
+
+def _save_users(data):
+    json.dump(data, open(USERS_FILE, 'w', encoding='utf-8'),
+              ensure_ascii=False, indent=2)
+
+
+def _hash_pw(pw):
+    return hashlib.sha256(pw.encode()).hexdigest()
+
+
+def _gen_key():
+    import secrets
+    return 'KEY-' + secrets.token_hex(8).upper()
+
+
+@app.route('/api/admin/users', methods=['GET'])
+def api_admin_users_list():
+    return jsonify(_load_users())
+
+
+@app.route('/api/admin/users', methods=['POST'])
+def api_admin_users_create():
+    data = request.get_json(silent=True) or {}
+    login = (data.get('login') or '').strip()
+    password = (data.get('password') or '').strip()
+    role = (data.get('role') or 'courier').strip()
+    if not login or not password:
+        return jsonify({'error': 'Логин и пароль обязательны'}), 400
+    db = _load_users()
+    if any(u['login'] == login for u in db['users']):
+        return jsonify({'error': 'Пользователь уже существует'}), 400
+    key = _gen_key()
+    user = {
+        'login': login,
+        'password_hash': _hash_pw(password),
+        'key': key,
+        'role': role,
+        'created': time.strftime('%Y-%m-%d %H:%M:%S'),
+    }
+    db['users'].append(user)
+    _save_users(db)
+    return jsonify({'ok': True, 'user': user})
+
+
+@app.route('/api/admin/users/<login>', methods=['DELETE'])
+def api_admin_users_delete(login):
+    db = _load_users()
+    db['users'] = [u for u in db['users'] if u['login'] != login]
+    _save_users(db)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/admin/users/<login>/regen-key', methods=['POST'])
+def api_admin_users_regen_key(login):
+    db = _load_users()
+    for u in db['users']:
+        if u['login'] == login:
+            u['key'] = _gen_key()
+            _save_users(db)
+            return jsonify({'ok': True, 'key': u['key']})
+    return jsonify({'error': 'Не найден'}), 404
+
+
+# ---------- Курьер / сборщик корзин ----------
+COURIER_DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'courier_data.json')
+
+
+def _load_courier_data():
+    try:
+        return json.load(open(COURIER_DATA_FILE, encoding='utf-8'))
+    except Exception:
+        return {}
+
+
+def _save_courier_data(data):
+    json.dump(data, open(COURIER_DATA_FILE, 'w', encoding='utf-8'),
+              ensure_ascii=False, indent=2)
+
+
+def _cd_section(login, key):
+    db = _load_courier_data()
+    if key not in db:
+        db[key] = {}
+    return db, db.setdefault(key, {}).setdefault(login, [])
+
+
+@app.route('/courier')
+def page_courier():
+    login = session.get('courier_user')
+    return render_template('courier.html', login=login or '')
+
+
+@app.route('/api/courier/me')
+def api_courier_me():
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False}), 401
+    return jsonify({'ok': True, 'login': login})
+
+
+@app.route('/api/courier/check', methods=['POST'])
+def api_courier_check():
+    data = request.get_json(silent=True) or {}
+    login = (data.get('login') or '').strip()
+    password = (data.get('password') or '').strip()
+    key = (data.get('key') or '').strip()
+    if not login or not password or not key:
+        return jsonify({'ok': False, 'error': 'Заполните все поля'}), 400
+    db = _load_users()
+    user = next((u for u in db['users'] if u['login'] == login), None)
+    if not user or user['password_hash'] != _hash_pw(password) or user['key'] != key:
+        return jsonify({'ok': False, 'error': 'Неверные данные'}), 403
+    session['courier_user'] = login
+    return jsonify({'ok': True, 'login': login})
+
+
+@app.route('/api/courier/logout', methods=['POST'])
+def api_courier_logout():
+    session.pop('courier_user', None)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/courier/accounts', methods=['GET'])
+def api_courier_accounts_list():
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
+    db = _load_courier_data()
+    accounts = (db.get('accounts') or {}).get(login, [])
+    return jsonify({'ok': True, 'accounts': accounts})
+
+
+@app.route('/api/courier/orders-count')
+def api_courier_orders_count():
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
+    db = _load_courier_data()
+    accounts = (db.get('accounts') or {}).get(login, [])
+    counts = {}
+    def _count(tok):
+        try:
+            s, acc = eda.get_eda_session_account(tok)
+            if acc:
+                counts[tok] = eda.order_count(acc)
+            else:
+                counts[tok] = None
+        except Exception:
+            counts[tok] = None
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    with ThreadPoolExecutor(max_workers=min(len(accounts) or 1, 8)) as ex:
+        futs = {ex.submit(_count, a['token']): a['token'] for a in accounts if a.get('token')}
+        for f in as_completed(futs):
+            pass
+    return jsonify({'ok': True, 'counts': counts})
+
+
+@app.route('/api/courier/accounts', methods=['POST'])
+def api_courier_accounts_add():
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
+    data = request.get_json(silent=True) or {}
+    token = data.get('token', '')
+    name = data.get('name', '')
+    profile_name = data.get('profile_name', '')
+    db, accounts = _cd_section(login, 'accounts')
+    if not any(a['token'] == token for a in accounts):
+        accounts.append({
+            'token': token, 'name': name, 'profile_name': profile_name,
+            'added': time.strftime('%Y-%m-%d %H:%M:%S'),
+        })
+        _save_courier_data(db)
+    return jsonify({'ok': True, 'accounts': accounts})
+
+
+@app.route('/api/courier/accounts/<token>', methods=['DELETE'])
+def api_courier_accounts_del(token):
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False}), 401
+    db, accounts = _cd_section(login, 'accounts')
+    db['accounts'][login] = [a for a in accounts if a.get('token') != token]
+    _save_courier_data(db)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/courier/address', methods=['GET', 'POST', 'DELETE'])
+def api_courier_address():
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
+    db, addrs = _cd_section(login, 'addresses')
+    if request.method == 'GET':
+        return jsonify({'ok': True, 'address': addrs[-1] if addrs else None, 'addresses': addrs})
+    if request.method == 'DELETE':
+        db['addresses'][login] = []
+        _save_courier_data(db)
+        return jsonify({'ok': True})
+    data = request.get_json(silent=True) or {}
+    addr = data.get('address') or {}
+    addr['saved_at'] = time.strftime('%Y-%m-%d %H:%M:%S')
+    addrs.append(addr)
+    _save_courier_data(db)
+    return jsonify({'ok': True, 'address': addr, 'addresses': addrs})
+
+
+@app.route('/api/courier/address/active', methods=['POST'])
+def api_courier_address_active():
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False}), 401
+    data = request.get_json(silent=True) or {}
+    idx = int(data.get('index', -1))
+    db, addrs = _cd_section(login, 'addresses')
+    if 0 <= idx < len(addrs):
+        addr = addrs[idx]
+        addrs.remove(addr)
+        addrs.append(addr)
+        _save_courier_data(db)
+        return jsonify({'ok': True, 'address': addr})
+    return jsonify({'error': 'Неверный индекс'}), 400
+
+
+@app.route('/api/courier/cart', methods=['GET', 'POST', 'DELETE'])
+def api_courier_cart():
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
+    db, carts = _cd_section(login, 'carts')
+    if request.method == 'GET':
+        return jsonify({'ok': True, 'cart': carts[-1] if carts else None, 'carts': carts})
+    if request.method == 'DELETE':
+        db['carts'][login] = []
+        _save_courier_data(db)
+        return jsonify({'ok': True})
+    data = request.get_json(silent=True) or {}
+    slug = data.get('slug', '')
+    items = data.get('items', [])
+    total = data.get('total', 0)
+    store_name = data.get('store_name', '')
+    existing = next((c for c in carts if c.get('slug') == slug), None)
+    if existing:
+        existing['items'] = items
+        existing['total'] = total
+        existing['store_name'] = store_name
+        existing['updated_at'] = time.strftime('%Y-%m-%d %H:%M:%S')
+    else:
+        carts.append({
+            'slug': slug, 'items': items, 'total': total,
+            'store_name': store_name,
+            'saved_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+        })
+    _save_courier_data(db)
+    return jsonify({'ok': True, 'carts': carts})
+
+
+@app.route('/api/courier/cart/<int:idx>', methods=['DELETE'])
+def api_courier_cart_delete_idx(idx=0):
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
+    db, carts = _cd_section(login, 'carts')
+    if 0 <= idx < len(carts):
+        carts.pop(idx)
+        _save_courier_data(db)
+    return jsonify({'ok': True, 'carts': carts})
+
+
+@app.route('/api/courier/cart/item-qty', methods=['POST'])
+def api_courier_cart_item_qty():
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    slug = data.get('slug')
+    item_id = data.get('item_id')
+    qty = int(data.get('qty', 1))
+    business = data.get('business', 'restaurant')
+    if not token or not slug or not item_id:
+        return jsonify({'error': 'token, slug, item_id required'}), 400
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        addr = s.get('address') or {}
+        lat = addr.get('latitude') or addr.get('lat')
+        lon = addr.get('longitude') or addr.get('lon')
+        if qty <= 0:
+            eda.add_to_cart(s['account'], slug, item_id, qty=0, lat=lat, lon=lon, business=business)
+        else:
+            eda.add_to_cart(s['account'], slug, item_id, qty=qty, lat=lat, lon=lon, business=business)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/courier/cart/clear-eda', methods=['POST'])
+def api_courier_cart_clear_eda():
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    slug = data.get('slug')
+    business = data.get('business')
+    if not token or not slug:
+        return jsonify({'error': 'token and slug required'}), 400
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        addr = s.get('address') or {}
+        lat = addr.get('latitude') or addr.get('lat')
+        lon = addr.get('longitude') or addr.get('lon')
+        result = eda.clear_cart(s['account'], slug, lat=lat, lon=lon, business=business)
+        import json
+        print(f'[CLEAR] slug={slug} result={json.dumps(result, ensure_ascii=False)[:500]}')
+        return jsonify({'ok': True, 'debug': result})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/eda/<token>/cart-detail')
+def api_eda_cart_detail(token):
+    """Detailed cart info: items with images, stock, delivery fees."""
+    try:
+        s = eda_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    slug = request.args.get('slug', '')
+    addr = s.get('address') or {}
+    loc = addr.get('location') or {}
+    lat = loc.get('latitude') or addr.get('lat')
+    lon = loc.get('longitude') or addr.get('lon')
+    try:
+        c = eda.cart(s['account'], slug=slug, lat=lat, lon=lon)
+        items = []
+        for it in (c.get('items') or []):
+            mi = it.get('place_menu_item') or {}
+            pic = mi.get('picture') or {}
+            img_url = pic.get('uri', '')
+            if img_url:
+                img_url = img_url.replace('{w}x{h}', '200x200')
+            items.append({
+                'item_id': it.get('item_id'),
+                'item_uid': it.get('item_uid'),
+                'name': mi.get('name') or it.get('name', ''),
+                'price': it.get('price') or mi.get('price', 0),
+                'promo_price': mi.get('promo_price') or 0,
+                'quantity': it.get('quantity', 1),
+                'in_stock': mi.get('in_stock'),
+                'available': mi.get('available', True),
+                'image': img_url,
+                'weight': mi.get('weight', ''),
+            })
+        return jsonify({
+            'ok': True,
+            'items': items,
+            'delivery_fee': c.get('delivery_fee', 0),
+            'subtotal': c.get('subtotal', 0),
+            'total': c.get('total', 0),
+            'discount': c.get('discount', 0),
+            'charges': c.get('charges', []),
+            'additional_payments': c.get('additional_payments', []),
+            'requirements': c.get('requirements', {}),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/courier/favorites', methods=['GET', 'POST', 'DELETE'])
+def api_courier_favorites():
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
+    db, favs = _cd_section(login, 'favorites')
+    if request.method == 'GET':
+        return jsonify({'ok': True, 'favorites': favs})
+    if request.method == 'DELETE':
+        idx = (request.get_json(silent=True) or {}).get('index')
+        if idx is not None and 0 <= idx < len(favs):
+            favs.pop(idx)
+            _save_courier_data(db)
+        return jsonify({'ok': True, 'favorites': favs})
+    data = request.get_json(silent=True) or {}
+    fav = {
+        'name': data.get('name', 'Favorite'),
+        'slug': data.get('slug', ''),
+        'items': data.get('items', []),
+        'total': data.get('total', 0),
+        'store_name': data.get('store_name', ''),
+        'source_token': data.get('source_token', ''),
+        'saved_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+    }
+    favs.append(fav)
+    _save_courier_data(db)
+    return jsonify({'ok': True, 'favorites': favs})
+
+
+@app.route('/api/courier/favorites/rename', methods=['POST'])
+def api_courier_favorites_rename():
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
+    db, favs = _cd_section(login, 'favorites')
+    data = request.get_json(silent=True) or {}
+    idx = data.get('index')
+    name = data.get('name', '').strip()
+    if idx is None or not name:
+        return jsonify({'ok': False, 'error': 'invalid'}), 400
+    if 0 <= idx < len(favs):
+        favs[idx]['name'] = name
+        favs[idx]['store_name'] = name
+        _save_courier_data(db)
+    return jsonify({'ok': True, 'favorites': favs})
+
+
+@app.route('/api/courier/fav-items', methods=['GET', 'POST', 'DELETE'])
+def api_courier_fav_items():
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
+    db, items = _cd_section(login, 'fav_items')
+    if request.method == 'GET':
+        return jsonify({'ok': True, 'items': items})
+    if request.method == 'DELETE':
+        data = request.get_json(silent=True) or {}
+        idx = data.get('index')
+        if idx is not None and 0 <= idx < len(items):
+            items.pop(idx)
+            _save_courier_data(db)
+        return jsonify({'ok': True, 'items': items})
+    data = request.get_json(silent=True) or {}
+    item = {
+        'item_uid': data.get('item_uid', ''),
+        'name': data.get('name', ''),
+        'price': data.get('price', 0),
+        'slug': data.get('slug', ''),
+        'business': data.get('business', 'restaurant'),
+        'added_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+    }
+    for existing in items:
+        if existing.get('item_uid') == item['item_uid']:
+            return jsonify({'ok': True, 'items': items, 'duplicate': True})
+    items.append(item)
+    _save_courier_data(db)
+    return jsonify({'ok': True, 'items': items})
+
+
+@app.route('/api/courier/copy-cart', methods=['POST'])
+def api_courier_copy_cart():
+    data = request.get_json(silent=True) or {}
+    src_token = data.get('from')
+    dst_tokens = data.get('to') or []
+    slug = data.get('slug')
+    if not src_token or not dst_tokens:
+        return jsonify({'error': 'from и to обязательны'}), 400
+    try:
+        src = eda_session(src_token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    try:
+        src_cart = eda.cart(src['account'], slug=slug)
+    except Exception as e:
+        src_cart = {}
+    src_items = (src_cart.get('cart') or {}).get('items') or []
+    src_business = 'restaurant'
+    try:
+        mc = eda.all_carts(src['account'])
+        for c in (mc.get('carts') or []):
+            if c.get('place_slug') == slug:
+                src_business = c.get('place_business') or 'restaurant'
+                if not src_items:
+                    src_items = c.get('items') or []
+                break
+    except Exception:
+        pass
+    if not src_items:
+        return jsonify({'error': 'Корзина пуста'}), 400
+    src_addr = src.get('address') or {}
+    results = []
+    for dt in dst_tokens:
+        try:
+            dst = eda_session(dt)
+        except RuntimeError as e:
+            results.append({'token': dt[:12] + '…', 'ok': False, 'error': str(e)})
+            continue
+        addr_ok = False
+        addr_note = ''
+        if src_addr and src_addr.get('latitude'):
+            try:
+                eda.set_eda_session_address(dt, src_addr)
+                addr_ok = True
+                addr_note = 'address set'
+            except Exception as e:
+                addr_note = f'address err: {e}'
+        added = 0
+        errors = []
+        for item in src_items:
+            menu_item = item.get('menu_item') or item.get('place_menu_item') or {}
+            item_id = menu_item.get('id') or item.get('item_id')
+            if not item_id or item_id == 0:
+                item_id = item.get('item_uid') or item.get('public_id')
+            if not item_id:
+                continue
+            qty = item.get('quantity') or 1
+            opts = item.get('options') or item.get('item_options') or []
+            try:
+                r = eda.add_to_cart(dst['account'], slug, str(item_id),
+                                qty=qty, item_options=opts,
+                                business=src_business)
+                added += 1
+            except Exception as e:
+                errors.append(str(e)[:200])
+        print(f'copy-cart debug: slug={slug} biz={src_business} items={len(src_items)} added={added} errs={len(errors)}', flush=True)
+        print(f'  dst account name={dst.get("account",{}).get("name","?")} use_web={eda._use_web(dst.get("account",{}))} bearer={bool(dst.get("account",{}).get("token",""))}', flush=True)
+        for e in errors[:2]:
+            print(f'  err: {e}', flush=True)
+        results.append({
+            'token': dt[:12] + '…',
+            'ok': added > 0,
+            'added': added,
+            'address_ok': addr_ok,
+            'address_note': addr_note,
+            'errors': errors[:3],
+        })
+    return jsonify({'ok': True, 'src_items': len(src_items), 'results': results})
+
+
+def _start_sales_bot():
+    """Запустить бот активации ключей в фоновом потоке (Railway).
+
+    Не блокирует webapp: если Telegram недоступен — поток перезапускается
+    в sales_bot.run_in_background. Отключить: SALES_BOT_ENABLED=0.
+    """
+    if os.environ.get('SALES_BOT_ENABLED', '1') == '0':
+        return
+    try:
+        import sales_bot
+        sales_bot.run_in_background()
+        print(' * Sales bot: запущен в фоне')
+    except Exception as e:
+        print(f' * Sales bot: не стартовал: {e}')
+
+
+_start_sales_bot()
+
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', '5001'))
+    print(f' * Web UI: http://0.0.0.0:{port}')
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)

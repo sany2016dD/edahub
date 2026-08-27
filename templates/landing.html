@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Яндекс Помощник — ваш автоматический помощник</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f8fb;
+    --bg-2: #ffffff;
+    --panel: #ffffff;
+    --border: #e6e9f2;
+    --text: #141824;
+    --muted: #6b7388;
+    --primary: #ff0033;
+    --primary-2: #ff4d6d;
+    --amber: #ffb020;
+    --green: #00b86b;
+    --blue: #4477ff;
+    --radius: 20px;
+    --shadow: 0 18px 50px rgba(30, 35, 60, .10);
+    --shadow-lg: 0 30px 80px rgba(30, 35, 60, .16);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Manrope', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  /* ---------- падающие логотипы Яндекса ---------- */
+  .falling-ya {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+  }
+  .falling-ya .ya-logo {
+    position: absolute; top: -60px;
+    font-weight: 900; color: rgba(255, 0, 51, .10);
+    animation: fall linear infinite;
+    user-select: none;
+    display: grid; place-items: center;
+  }
+  .falling-ya .ya-logo span {
+    display: grid; place-items: center;
+    width: 44px; height: 44px; border-radius: 12px;
+    background: #fff; box-shadow: 0 6px 18px rgba(255,0,51,.14);
+    color: var(--primary); font-size: 20px;
+    transform: rotate(-6deg);
+  }
+  @keyframes fall {
+    0%   { transform: translateY(-70px) rotate(0deg); opacity: 0; }
+    10%  { opacity: 1; }
+    100% { transform: translateY(110vh) rotate(360deg); opacity: .9; }
+  }
+
+  .container { max-width: 1140px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+  /* ---------- шапка ---------- */
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,.85);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; }
+  .brand { display: flex; align-items: center; gap: 12px; font-weight: 800; font-size: 20px; }
+  .brand-mark {
+    width: 40px; height: 40px; border-radius: 13px;
+    background: var(--primary); display: grid; place-items: center;
+    font-weight: 900; color: #fff; font-size: 19px;
+    box-shadow: 0 8px 20px rgba(255,0,51,.35);
+    animation: float 3s ease-in-out infinite;
+  }
+  @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+  .nav-links { display: flex; gap: 28px; color: var(--muted); font-size: 15px; font-weight: 700; }
+  .nav-links a { position: relative; }
+  .nav-links a::after {
+    content: ''; position: absolute; left: 0; bottom: -4px; width: 0; height: 2px;
+    background: var(--primary); transition: width .25s; border-radius: 2px;
+  }
+  .nav-links a:hover { color: var(--text); }
+  .nav-links a:hover::after { width: 100%; }
+  .nav-cta {
+    background: var(--primary); color: #fff; font-weight: 800; font-size: 15px;
+    padding: 11px 22px; border-radius: 12px; transition: transform .15s, background .15s, box-shadow .15s;
+    box-shadow: 0 8px 20px rgba(255,0,51,.28);
+  }
+  .nav-cta:hover { background: var(--primary-2); transform: translateY(-2px); box-shadow: 0 12px 26px rgba(255,0,51,.4); }
+
+  /* ---------- первый экран ---------- */
+  .hero { padding: 110px 0 90px; text-align: center; position: relative; }
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #fff; color: var(--green);
+    border: 1px solid rgba(0,184,107,.3);
+    font-weight: 700; font-size: 14px; padding: 8px 18px; border-radius: 100px; margin-bottom: 28px;
+    box-shadow: 0 6px 16px rgba(0,184,107,.12);
+  }
+  .hero-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .hero h1 {
+    font-size: clamp(40px, 6vw, 76px); font-weight: 900; line-height: 1.06; letter-spacing: -1.5px;
+  }
+  .hero h1 .accent {
+    background: linear-gradient(135deg, #ff2d55, var(--primary));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    position: relative;
+  }
+  .hero h1 .accent::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: 6px; height: 10px;
+    background: rgba(255,0,51,.16); border-radius: 6px; z-index: -1;
+    animation: slide 2.4s ease-in-out infinite;
+  }
+  @keyframes slide { 0%,100% { transform: scaleX(.6); transform-origin: left; } 50% { transform: scaleX(1); transform-origin: right; } }
+  .hero p.lead {
+    max-width: 660px; margin: 26px auto 0; color: var(--muted); font-size: clamp(17px, 2.4vw, 20px);
+  }
+  .hero-actions { margin-top: 42px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-weight: 800; font-size: 17px; padding: 16px 32px; border-radius: 14px;
+    transition: transform .18s, box-shadow .18s;
+  }
+  .btn-primary { background: var(--primary); color: #fff; box-shadow: 0 14px 34px rgba(255,0,51,.35); }
+  .btn-primary:hover { transform: translateY(-3px) scale(1.02); box-shadow: 0 20px 46px rgba(255,0,51,.45); }
+  .btn-ghost { background: #fff; color: var(--text); border: 1.5px solid var(--border); box-shadow: var(--shadow); }
+  .btn-ghost:hover { transform: translateY(-3px); border-color: var(--primary); }
+
+  /* ---------- секции ---------- */
+  .section { padding: 96px 0; position: relative; z-index: 1; }
+  .section-alt { background: #fff; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .section-head { text-align: center; max-width: 660px; margin: 0 auto 60px; }
+  .section-head .kicker {
+    color: var(--primary); font-weight: 800; font-size: 14px; text-transform: uppercase; letter-spacing: 3px;
+  }
+  .section-head h2 { font-size: clamp(30px, 4vw, 46px); font-weight: 900; margin-top: 12px; letter-spacing: -1px; }
+  .section-head p { color: var(--muted); margin-top: 16px; font-size: 17px; }
+
+  /* ---------- карточки возможностей ---------- */
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; }
+  .feature {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 36px 30px; position: relative; overflow: hidden;
+    box-shadow: var(--shadow);
+    transition: transform .25s, box-shadow .25s;
+  }
+  .feature::before {
+    content: ''; position: absolute; inset: 0 0 auto 0; height: 4px;
+    background: linear-gradient(90deg, var(--primary), var(--amber), var(--green));
+    transform: scaleX(0); transform-origin: left; transition: transform .35s;
+  }
+  .feature:hover { transform: translateY(-8px); box-shadow: var(--shadow-lg); }
+  .feature:hover::before { transform: scaleX(1); }
+  .feature-icon {
+    width: 60px; height: 60px; border-radius: 18px; display: grid; place-items: center;
+    font-size: 28px; margin-bottom: 22px;
+    animation: wiggle 6s ease-in-out infinite;
+  }
+  @keyframes wiggle { 0%,100% { transform: rotate(0); } 5% { transform: rotate(-6deg) scale(1.08); } 10% { transform: rotate(6deg); } 15% { transform: rotate(0); } }
+  .feature:nth-child(1) .feature-icon { background: rgba(255,0,51,.1); }
+  .feature:nth-child(2) .feature-icon { background: rgba(255,176,32,.14); }
+  .feature:nth-child(3) .feature-icon { background: rgba(0,184,107,.12); }
+  .feature:nth-child(4) .feature-icon { background: rgba(68,119,255,.12); }
+  .feature h3 { font-size: 21px; font-weight: 800; margin-bottom: 10px; }
+  .feature p { color: var(--muted); font-size: 15.5px; }
+
+  /* ---------- шаги ---------- */
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
+  .step {
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 32px 28px; box-shadow: var(--shadow); position: relative;
+  }
+  .step .num {
+    width: 48px; height: 48px; border-radius: 50%;
+    background: var(--primary); color: #fff; font-weight: 900; font-size: 20px;
+    display: grid; place-items: center; margin-bottom: 20px;
+    box-shadow: 0 8px 20px rgba(255,0,51,.3);
+    animation: pop 3s ease-in-out infinite;
+  }
+  @keyframes pop { 0%,100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+  .step h3 { font-size: 18px; font-weight: 800; margin-bottom: 8px; }
+  .step p { color: var(--muted); font-size: 15px; }
+
+  /* ---------- статистика ---------- */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 22px; }
+  .stat {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 36px 24px; text-align: center; box-shadow: var(--shadow);
+    transition: transform .2s;
+  }
+  .stat:hover { transform: translateY(-5px); }
+  .stat .value {
+    font-size: 44px; font-weight: 900;
+    background: linear-gradient(135deg, var(--primary), #ff7a94);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: countpulse 2.5s ease-in-out infinite;
+  }
+  @keyframes countpulse { 0%,100% { opacity: 1; } 50% { opacity: .7; } }
+  .stat .label { color: var(--muted); font-size: 14px; font-weight: 600; margin-top: 8px; }
+
+  /* ---------- финальный блок ---------- */
+  .cta {
+    background: linear-gradient(135deg, #ff2d55, var(--primary));
+    border-radius: 30px; padding: 70px 40px; text-align: center; color: #fff;
+    box-shadow: 0 30px 80px rgba(255,0,51,.4);
+    position: relative; overflow: hidden;
+  }
+  .cta::before {
+    content: 'Я'; position: absolute; font-size: 320px; font-weight: 900;
+    right: -40px; top: -80px; color: rgba(255,255,255,.08); pointer-events: none;
+  }
+  .cta::after {
+    content: 'Я'; position: absolute; font-size: 220px; font-weight: 900;
+    left: -30px; bottom: -90px; color: rgba(255,255,255,.06); pointer-events: none;
+  }
+  .cta h2 { font-size: clamp(28px, 4vw, 42px); font-weight: 900; position: relative; }
+  .cta p { opacity: .92; max-width: 540px; margin: 16px auto 32px; font-size: 17px; position: relative; }
+  .cta .btn-white {
+    background: #fff; color: var(--primary); font-weight: 900; font-size: 17px;
+    padding: 16px 34px; border-radius: 14px; display: inline-flex; gap: 10px; position: relative;
+    box-shadow: 0 14px 34px rgba(0,0,0,.2); transition: transform .18s;
+  }
+  .cta .btn-white:hover { transform: translateY(-3px) scale(1.03); }
+
+  footer { border-top: 1px solid var(--border); padding: 36px 0; background: #fff; position: relative; z-index: 1; }
+  .footer-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 14px; }
+
+  /* ---------- появление при прокрутке ---------- */
+  .reveal { opacity: 0; transform: translateY(40px); transition: opacity .7s, transform .7s; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  /* ---------- моушен-демо ---------- */
+  .demo-wrap { display: flex; gap: 40px; align-items: flex-start; flex-wrap: wrap; }
+  .demo-stage {
+    flex: 1 1 560px; background: #0b0d12; border-radius: 22px; padding: 18px;
+    box-shadow: var(--shadow-lg); border: 1px solid #262d3f;
+  }
+  .demo-window {
+    background: #10131a; border: 1px solid #262d3f; border-radius: 16px; overflow: hidden;
+  }
+  .demo-bar {
+    display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+    background: #151924; border-bottom: 1px solid #262d3f;
+  }
+  .demo-bar .dotw { width: 11px; height: 11px; border-radius: 50%; }
+  .demo-bar .url {
+    flex: 1; margin-left: 10px; background: #1c2130; color: #98a0b8;
+    font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 8px;
+    font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .demo-body { padding: 22px 26px 26px; min-height: 340px; position: relative; }
+  .demo-title { color: #f2f5fb; font-size: 17px; font-weight: 800; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .demo-title .dstep { background: rgba(228,0,43,.2); color: #ff6b88; font-size: 11px; font-weight: 800; padding: 3px 10px; border-radius: 100px; }
+  .demo-card {
+    background: #151924; border: 1px solid #262d3f; border-radius: 14px; padding: 18px; margin-bottom: 12px;
+    transition: border-color .3s, background .3s, box-shadow .3s;
+  }
+  .demo-card.hl { border-color: rgba(255,77,109,.7); background: #1a2030; box-shadow: 0 0 0 3px rgba(255,0,51,.15); }
+  .demo-card .dc-row { display: flex; align-items: center; gap: 12px; }
+  .dc-ava {
+    width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+    color: #fff; font-weight: 800; font-size: 15px; flex-shrink: 0;
+  }
+  .dc-name { color: #f2f5fb; font-weight: 700; font-size: 14px; }
+  .dc-sub { color: #98a0b8; font-size: 12px; margin-top: 2px; }
+  .dc-check { margin-left: auto; width: 22px; height: 22px; border-radius: 50%; background: rgba(47,209,124,.18); color: var(--green); display: grid; place-items: center; font-size: 12px; flex-shrink: 0; }
+  .dc-prog { margin-left: auto; width: 120px; height: 8px; background: #262d3f; border-radius: 100px; overflow: hidden; flex-shrink: 0; }
+  .dc-prog i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #ff2d55, var(--amber)); border-radius: 100px; transition: width .4s; }
+  .demo-btn {
+    display: inline-flex; align-items: center; gap: 8px; background: #e4002b; color: #fff;
+    font-weight: 800; font-size: 14px; padding: 13px 22px; border-radius: 12px;
+    cursor: pointer; transition: transform .15s, box-shadow .15s, opacity .3s;
+    box-shadow: 0 8px 20px rgba(228,0,43,.3);
+  }
+  .demo-btn:hover { transform: translateY(-2px); }
+  .demo-btn:active { transform: scale(.96); }
+  .demo-btn.ghost { background: #1c2130; color: #f2f5fb; box-shadow: none; }
+  .demo-hint {
+    display: none; color: #98a0b8; font-size: 13px; font-weight: 600; padding: 10px 14px;
+    border-left: 3px solid rgba(255,77,109,.8); background: rgba(228,0,43,.08);
+    border-radius: 0 10px 10px 0; margin: 10px 0;
+  }
+  .demo-hint.show { display: block; animation: fadein .4s; }
+  @keyframes fadein { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+  .demo-success {
+    display: none; text-align: center; padding: 26px 10px;
+  }
+  .demo-success.show { display: block; animation: popin .5s cubic-bezier(.2,1.4,.4,1); }
+  @keyframes popin { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: scale(1); } }
+  .demo-success .big { font-size: 60px; }
+  .demo-success h3 { color: #2fd17c; font-size: 22px; font-weight: 900; margin-top: 8px; }
+  .demo-success p { color: #98a0b8; font-size: 15px; margin-top: 8px; }
+  .demo-success .stats-line { display: flex; gap: 12px; justify-content: center; margin-top: 18px; flex-wrap: wrap; }
+  .demo-success .sstat { background: #151924; border: 1px solid #262d3f; border-radius: 12px; padding: 10px 18px; }
+  .demo-success .sstat b { color: #f2f5fb; font-size: 18px; display: block; }
+  .demo-success .sstat span { color: #98a0b8; font-size: 12px; }
+
+  .demo-controls { flex: 1 1 320px; }
+  .demo-controls h3 { font-size: 24px; font-weight: 900; margin-bottom: 12px; letter-spacing: -.5px; }
+  .demo-controls > p { color: var(--muted); font-size: 15.5px; margin-bottom: 24px; }
+  .demo-timeline { list-style: none; margin-bottom: 26px; }
+  .demo-timeline li {
+    display: flex; align-items: flex-start; gap: 14px; padding: 13px 0; border-bottom: 1px dashed var(--border);
+  }
+  .demo-timeline li:last-child { border-bottom: none; }
+  .demo-timeline .tl-dot {
+    width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; margin-top: 1px;
+    border: 2px solid var(--border); display: grid; place-items: center; font-size: 11px; font-weight: 800;
+    transition: all .3s; color: var(--muted);
+  }
+  .demo-timeline li.active .tl-dot { background: var(--primary); border-color: var(--primary); color: #fff; box-shadow: 0 0 0 5px rgba(255,0,51,.15); animation: pulse 1.6s infinite; }
+  .demo-timeline li.done .tl-dot { background: var(--green); border-color: var(--green); color: #fff; }
+  .demo-timeline .tl-txt { flex: 1; }
+  .demo-timeline .tl-txt b { font-size: 15px; font-weight: 800; display: block; }
+  .demo-timeline .tl-txt span { color: var(--muted); font-size: 13px; }
+  .demo-timeline li.active .tl-txt b { color: var(--primary); }
+  .demo-timeline li.done .tl-txt b { color: var(--green); }
+  .demo-play-btns { display: flex; gap: 12px; flex-wrap: wrap; }
+  .demo-play {
+    flex: 1; min-width: 150px; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    background: var(--primary); color: #fff; font-weight: 800; font-size: 16px; padding: 15px 20px;
+    border-radius: 14px; cursor: pointer; border: none; transition: transform .15s, box-shadow .15s;
+    box-shadow: 0 12px 30px rgba(255,0,51,.3);
+  }
+  .demo-play:hover { transform: translateY(-2px); }
+  .demo-play.secondary { background: #fff; color: var(--text); border: 1.5px solid var(--border); box-shadow: var(--shadow); }
+  /* ---------- стили новых сцен: промокоды, акции, плюс ---------- */
+  .promo-list { display: grid; gap: 10px; }
+  .promo-item {
+    display: flex; align-items: center; gap: 12px; background: #151924;
+    border: 1px solid #262d3f; border-radius: 12px; padding: 12px 16px;
+    transition: border-color .3s, background .3s, transform .3s;
+  }
+  .promo-item.hl { border-color: rgba(255,77,109,.7); background: #1a2030; box-shadow: 0 0 0 3px rgba(255,0,51,.15); transform: translateX(4px); }
+  .promo-item .p-tag {
+    background: rgba(255,176,32,.16); color: #ffb020; font-weight: 800; font-size: 12px;
+    padding: 4px 10px; border-radius: 8px; flex-shrink: 0;
+  }
+  .promo-item .p-name { flex: 1; color: #f2f5fb; font-size: 13.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .promo-item .p-code {
+    font-family: monospace; background: #1c2130; border: 1px dashed rgba(255,77,109,.5);
+    color: #ff8ea4; font-size: 12px; padding: 4px 10px; border-radius: 8px; font-weight: 700;
+    animation: blinker 1s steps(2) infinite;
+  }
+  @keyframes blinker { 50% { opacity: .55; } }
+  .demo-chip {
+    display: inline-flex; align-items: center; gap: 6px; background: rgba(47,209,124,.12);
+    border: 1px solid rgba(47,209,124,.35); color: #2fd17c; font-weight: 800; font-size: 12px;
+    padding: 4px 12px; border-radius: 100px;
+  }
+  .deal-card {
+    display: flex; align-items: center; gap: 16px; background: #151924;
+    border: 1px solid #262d3f; border-radius: 14px; padding: 18px 20px;
+  }
+  .deal-card.hl { border-color: rgba(47,209,124,.7); box-shadow: 0 0 0 3px rgba(47,209,124,.15); }
+  .deal-img {
+    width: 64px; height: 64px; border-radius: 14px; display: grid; place-items: center;
+    background: #1c2130; font-size: 30px; flex-shrink: 0;
+  }
+  .deal-name { color: #f2f5fb; font-weight: 800; font-size: 15px; }
+  .deal-old { color: #6b7388; font-size: 12.5px; text-decoration: line-through; }
+  .deal-price { color: #2fd17c; font-size: 22px; font-weight: 900; }
+  .deal-price small { font-size: 12px; font-weight: 700; color: #8aa0b8; }
+  .plus-box {
+    background: #151924; border: 1px solid #262d3f; border-radius: 14px; padding: 18px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .plus-box.hl { border-color: rgba(255,77,109,.7); box-shadow: 0 0 0 3px rgba(255,0,51,.15); }
+  .plus-logo {
+    width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center;
+    background: linear-gradient(135deg, #ff2d55, #ff7a94); color: #fff; font-weight: 900; font-size: 20px; flex-shrink: 0;
+  }
+  .plus-bar { flex: 1; }
+  .plus-bar b { color: #f2f5fb; font-size: 15px; display: block; }
+  .plus-bar span { color: #98a0b8; font-size: 12.5px; }
+  .plus-meter { height: 10px; background: #262d3f; border-radius: 100px; overflow: hidden; margin-top: 10px; }
+  .plus-meter i {
+    display: block; height: 100%; width: 0%; border-radius: 100px;
+    background: linear-gradient(90deg, #ff2d55, #ffb020);
+    transition: width .5s ease;
+  }
+  .plus-done {
+    margin-left: auto; width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+    background: rgba(47,209,124,.2); color: #2fd17c; display: grid; place-items: center; font-size: 15px;
+    opacity: 0; transition: opacity .4s, transform .4s;
+  }
+  .plus-done.on { opacity: 1; transform: scale(1.15); }
+
+  /* ---------- таблица аккаунтов в демо ---------- */
+  .acct-table { display: grid; gap: 6px; }
+  .at-head {
+    display: grid; grid-template-columns: 1.4fr 1fr; gap: 10px; align-items: center;
+    padding: 8px 14px; color: #6b7388; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px;
+  }
+  .at-row {
+    display: grid; grid-template-columns: 1.4fr 1fr; gap: 10px; align-items: center;
+    background: #151924; border: 1px solid #262d3f; border-radius: 11px; padding: 11px 14px;
+    transition: border-color .3s, background .3s, box-shadow .3s, opacity .3s;
+  }
+  .at-row.hl { border-color: rgba(255,77,109,.7); background: #1a2030; box-shadow: 0 0 0 3px rgba(255,0,51,.15); }
+  .at-row.ok { border-color: rgba(47,209,124,.5); background: rgba(47,209,124,.06); }
+  .at-name { color: #f2f5fb; font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .at-ok { color: #2fd17c; font-weight: 800; font-size: 12.5px; }
+  .at-wait { color: #6b7388; font-size: 13px; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: .4; } }
+  .deal-tag { color: #ffb020; font-weight: 800; font-size: 12.5px; }
+  .deal-tag.none { color: #6b7388; text-decoration: line-through; }
+
+  @media (max-width: 900px) { .demo-wrap { flex-direction: column; } .demo-controls { flex: 1 1 auto; } }
+
+  @media (max-width: 700px) {
+    .nav-links { display: none; }
+    .hero { padding: 70px 0 50px; }
+    .section { padding: 60px 0; }
+  }
+</style>
+</head>
+<body>
+
+<!-- падающие логотипы Яндекса -->
+<div class="falling-ya" id="fallingYa"></div>
+
+<header>
+  <div class="container nav">
+    <div class="brand">
+      <div class="brand-mark">Я</div>
+      <span>Яндекс Помощник</span>
+    </div>
+    <div class="nav-links">
+      <a href="#features">Возможности</a>
+      <a href="#how">Как работает</a>
+      <a href="#demo">Демо</a>
+      <a href="#start">Начать</a>
+    </div>
+    <a class="nav-cta" href="#start">Попробовать</a>
+  </div>
+</header>
+
+<!-- Первый экран -->
+<section class="hero container">
+  <div class="hero-badge"><span class="dot"></span> работает автоматически 24/7</div>
+  <h1>Всё для Яндекса<br>в <span class="accent">одном помощнике</span></h1>
+  <p class="lead">
+    Сканируем промокоды, следим за акциями, копим баллы Плюса и подключаем
+    подписку за вас. Просто добавьте аккаунт — остальное сделаем мы.
+  </p>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="#start">🚀 Начать бесплатно</a>
+    <a class="btn btn-ghost" href="#features">Что умеет</a>
+  </div>
+</section>
+
+<!-- Возможности -->
+<section class="section" id="features">
+  <div class="container">
+    <div class="section-head reveal">
+      <div class="kicker">Возможности</div>
+      <h2>Ваш личный автоматизатор Яндекса</h2>
+      <p>Вместо рутины — один клик и полный контроль. Помощник сам ищет и делает всё самое полезное.</p>
+    </div>
+    <div class="features">
+      <div class="feature reveal">
+        <div class="feature-icon">🎫</div>
+        <h3>Сканирование промокодов</h3>
+        <p>Автоматически находим и активируем промокоды для ваших покупок. Вам больше не нужно охотиться за скидками — мы делаем это за вас.</p>
+      </div>
+      <div class="feature reveal">
+        <div class="feature-icon">🏷️</div>
+        <h3>Отслеживание акций</h3>
+        <p>Мониторим акции на ваших аккаунтах и сообщаем, когда появляется что-то выгодное. Не пропустите ни одной хорошей цены.</p>
+      </div>
+      <div class="feature reveal">
+        <div class="feature-icon">⭐</div>
+        <h3>Баллы Плюса</h3>
+        <p>Считаем и копим баллы Плюса автоматически. Помощник знает, сколько у вас баллов и как получить их больше.</p>
+      </div>
+      <div class="feature reveal">
+        <div class="feature-icon">🚀</div>
+        <h3>Подключение Плюса</h3>
+        <p>Подключаем подписку Яндекса Плюс за вас. Быстро, автоматически, без лишних кликов и ожиданий.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Как это работает -->
+<section class="section section-alt" id="how">
+  <div class="container">
+    <div class="section-head reveal">
+      <div class="kicker">Как это работает</div>
+      <h2>Три простых шага</h2>
+      <p>Всё настолько просто, что справится каждый — никаких технических знаний не нужно.</p>
+    </div>
+    <div class="steps">
+      <div class="step reveal">
+        <div class="num">1</div>
+        <h3>Добавьте аккаунт</h3>
+        <p>Войдите в свой аккаунт Яндекса через удобную ссылку или QR-код — за пару секунд.</p>
+      </div>
+      <div class="step reveal">
+        <div class="num">2</div>
+        <h3>Выберите, что включить</h3>
+        <p>Отметьте нужные функции: промокоды, акции, баллы или подключение Плюса.</p>
+      </div>
+      <div class="step reveal">
+        <div class="num">3</div>
+        <h3>Получайте результат</h3>
+        <p>Помощник работает в фоне и показывает всё, что нашёл и сделал. Остаётся только радоваться.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Моушен-демо -->
+<section class="section" id="demo">
+  <div class="container">
+    <div class="section-head reveal">
+      <div class="kicker">Живое демо</div>
+      <h2>Посмотрите, как это работает</h2>
+      <p>Один короткий ролик — весь путь от добавления аккаунта до готовых отзывов. Нажмите «Запустить демо».</p>
+    </div>
+
+    <div class="demo-wrap reveal">
+      <!-- сцена -->
+      <div class="demo-stage">
+        <div class="demo-window">
+          <div class="demo-bar">
+            <span class="dotw" style="background:#ff5f57"></span>
+            <span class="dotw" style="background:#febc2e"></span>
+            <span class="dotw" style="background:#28c840"></span>
+            <span class="url" id="demoUrl">⚙️ панель помощника</span>
+          </div>
+          <div class="demo-body" id="demoBody">
+            <!-- сцена 1: добавление аккаунта -->
+            <div class="scene" data-scene="1">
+              <div class="demo-title"><span class="dstep">Шаг 1</span> Добавьте аккаунт Яндекса</div>
+              <div class="demo-card" id="sc1Card">
+                <div class="dc-row">
+                  <div class="dc-ava" style="background:linear-gradient(135deg,#ff2d55,#ff7a94)">Я</div>
+                  <div style="flex:1">
+                    <div class="dc-name">Ваш аккаунт</div>
+                    <div class="dc-sub">Подключение через ссылку или QR-код</div>
+                  </div>
+                  <span class="dc-check" id="sc1Check" style="opacity:0">✓</span>
+                </div>
+              </div>
+              <div class="demo-hint" id="sc1Hint">Отправляем запрос на подключение…</div>
+              <div class="demo-btn" id="sc1Btn">🔗 Подключить аккаунт</div>
+            </div>
+
+            <!-- сцена 2: переход в панель -->
+            <div class="scene" data-scene="2" style="display:none">
+              <div class="demo-title"><span class="dstep">Шаг 2</span> Вы — в панели помощника</div>
+              <div class="demo-card hl">
+                <div class="dc-row">
+                  <div class="dc-ava" style="background:linear-gradient(135deg,#ff2d55,#ff7a94)">Я</div>
+                  <div style="flex:1">
+                    <div class="dc-name">Аккаунт подключён</div>
+                    <div class="dc-sub">Все возможности под рукой</div>
+                  </div>
+                  <span class="dc-check">✓</span>
+                </div>
+              </div>
+              <div class="demo-hint" id="sc2Hint">Начинаем сканировать промокоды и акции…</div>
+            </div>
+
+            <!-- сцена 3: сканирование промокодов по аккаунтам -->
+            <div class="scene" data-scene="3" style="display:none">
+              <div class="demo-title"><span class="dstep">Шаг 3</span> Промокоды по аккаунтам</div>
+              <div class="acct-table">
+                <div class="at-head"><span>Аккаунт</span><span>Промокод</span></div>
+                <div class="at-row hl" id="ar1">
+                  <span class="at-name">🟦 Аккаунт 1</span>
+                  <span class="p-code">500GO</span>
+                </div>
+                <div class="at-row" id="ar2">
+                  <span class="at-name">🟨 Аккаунт 2</span>
+                  <span class="p-code">NICE500</span>
+                </div>
+                <div class="at-row" id="ar3">
+                  <span class="at-name">🟩 Аккаунт 3</span>
+                  <span class="p-code">FREE500</span>
+                </div>
+                <div class="at-row" id="ar4">
+                  <span class="at-name">🟪 Аккаунт 4</span>
+                  <span class="p-code">500GO</span>
+                </div>
+                <div class="at-row" id="ar5">
+                  <span class="at-name">🟫 Аккаунт 5</span>
+                  <span class="p-code">NICE500</span>
+                </div>
+                <div class="at-row" id="ar6">
+                  <span class="at-name">🟥 Аккаунт 6</span>
+                  <span class="p-code">FREE500</span>
+                </div>
+              </div>
+              <div class="demo-hint" id="sc3Hint">Сканируем промокоды на всех аккаунтах…</div>
+            </div>
+
+            <!-- сцена 4: акция за рубль по аккаунтам -->
+            <div class="scene" data-scene="4" style="display:none">
+              <div class="demo-title"><span class="dstep">Шаг 4</span> Акция за 1 ₽ по аккаунтам</div>
+              <div class="acct-table">
+                <div class="at-head"><span>Аккаунт</span><span>Акция за 1 ₽</span></div>
+                <div class="at-row hl" id="dl1">
+                  <span class="at-name">🟦 Аккаунт 1</span>
+                  <span class="deal-tag">🎧 Наушники</span>
+                </div>
+                <div class="at-row" id="dl2">
+                  <span class="at-name">🟨 Аккаунт 2</span>
+                  <span class="deal-tag none">нет акции</span>
+                </div>
+                <div class="at-row" id="dl3">
+                  <span class="at-name">🟩 Аккаунт 3</span>
+                  <span class="deal-tag">☕ Термокружка</span>
+                </div>
+                <div class="at-row" id="dl4">
+                  <span class="at-name">🟥 Аккаунт 4</span>
+                  <span class="deal-tag">🎧 Наушники</span>
+                </div>
+                <div class="at-row" id="dl5">
+                  <span class="at-name">🟪 Аккаунт 5</span>
+                  <span class="deal-tag none">нет акции</span>
+                </div>
+                <div class="at-row" id="dl6">
+                  <span class="at-name">🟫 Аккаунт 6</span>
+                  <span class="deal-tag">☕ Термокружка</span>
+                </div>
+              </div>
+              <div class="demo-hint" id="sc4Hint">Ищем акцию «за 1 ₽» на всех аккаунтах…</div>
+            </div>
+
+            <!-- сцена 5: подключение Плюса -->
+            <div class="scene" data-scene="5" style="display:none">
+              <div class="demo-title"><span class="dstep">Шаг 5</span> Подключение Яндекса Плюс</div>
+              <div class="plus-box hl" id="plusBox">
+                <div class="plus-logo">+</div>
+                <div class="plus-bar">
+                  <b>Яндекс Плюс</b>
+                  <span>Подключаем подписку за вас…</span>
+                  <div class="plus-meter"><i id="plusMeter"></i></div>
+                </div>
+                <div class="plus-done" id="plusDone">✓</div>
+              </div>
+              <div class="demo-hint" id="sc5Hint">Плюс подключён! Баллы уже копятся.</div>
+            </div>
+
+            <!-- сцена 6: нажатие кнопки отзывов -->
+            <div class="scene" data-scene="6" style="display:none">
+              <div class="demo-title"><span class="dstep">Шаг 6</span> Оставьте отзывы одним нажатием</div>
+              <div class="demo-card hl">
+                <div class="dc-row">
+                  <div class="dc-ava" style="background:linear-gradient(135deg,#ffb020,#ffd27a)">1</div>
+                  <div style="flex:1">
+                    <div class="dc-name">Покупка готова к отзыву</div>
+                    <div class="dc-sub">Заказ из Яндекса · 5 звёзд</div>
+                  </div>
+                  <span class="dc-check">✓</span>
+                </div>
+              </div>
+              <div class="demo-card" id="sc3Card2">
+                <div class="dc-row">
+                  <div class="dc-ava" style="background:linear-gradient(135deg,#00b86b,#5ce0a3)">2</div>
+                  <div style="flex:1">
+                    <div class="dc-name">Ещё одна покупка</div>
+                    <div class="dc-sub">Заказ из Яндекса · 5 звёзд</div>
+                  </div>
+                  <span class="dc-check">✓</span>
+                </div>
+              </div>
+              <div class="demo-hint" id="sc3Hint">Оставляем отзывы на всех аккаунтах…</div>
+              <div class="demo-btn" id="sc3Btn">✍️ Оставить отзывы на всех аккаунтах</div>
+            </div>
+
+            <!-- сцена 7: результат -->
+            <div class="scene" data-scene="7" style="display:none">
+              <div class="demo-title"><span class="dstep">Шаг 7</span> Готово!</div>
+              <div class="demo-success show">
+                <div class="big">🎉</div>
+                <h3>Всё сделано за вас</h3>
+                <p>Промокоды, акции, Плюс и отзывы — автоматически.</p>
+                <div class="stats-line">
+                  <div class="sstat"><b id="demoCount">0</b><span>отзывов</span></div>
+                  <div class="sstat"><b>11</b><span>аккаунтов</span></div>
+                  <div class="sstat"><b>30 сек</b><span>времени</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- управление -->
+      <div class="demo-controls">
+        <h3>Путь пользователя</h3>
+        <p>Демо повторяет настоящий сценарий: подключение, промокоды, акции, Плюс и отзывы — за один проход.</p>
+        <ul class="demo-timeline" id="demoTimeline">
+          <li data-tl="1"><span class="tl-dot">1</span><div class="tl-txt"><b>Добавление аккаунта</b><span>Вход через ссылку или QR-код</span></div></li>
+          <li data-tl="2"><span class="tl-dot">2</span><div class="tl-txt"><b>Переход в панель</b><span>Все возможности под рукой</span></div></li>
+          <li data-tl="3"><span class="tl-dot">3</span><div class="tl-txt"><b>Сканирование промокодов</b><span>Находим и активируем скидки</span></div></li>
+          <li data-tl="4"><span class="tl-dot">4</span><div class="tl-txt"><b>Акция за рубль</b><span>Выгодное предложение найдено</span></div></li>
+          <li data-tl="5"><span class="tl-dot">5</span><div class="tl-txt"><b>Подключение Плюса</b><span>Подписка подключается за вас</span></div></li>
+          <li data-tl="6"><span class="tl-dot">6</span><div class="tl-txt"><b>Отзывы одним нажатием</b><span>На всех аккаунтах сразу</span></div></li>
+          <li data-tl="7"><span class="tl-dot">7</span><div class="tl-txt"><b>Готовый результат</b><span>Всё сделано автоматически</span></div></li>
+        </ul>
+        <div class="demo-play-btns">
+          <button class="demo-play" id="demoPlay">▶ Запустить демо</button>
+          <button class="demo-play secondary" id="demoReset">↺ Сбросить</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Цифры -->
+<section class="section">
+  <div class="container">
+    <div class="section-head reveal">
+      <div class="kicker">Почему мы</div>
+      <h2>Помощник, которому можно доверять</h2>
+    </div>
+    <div class="stats">
+      <div class="stat reveal"><div class="value">24/7</div><div class="label">работает без выходных</div></div>
+      <div class="stat reveal"><div class="value">100%</div><div class="label">автоматически, без рутины</div></div>
+      <div class="stat reveal"><div class="value">1 мин</div><div class="label">на подключение аккаунта</div></div>
+      <div class="stat reveal"><div class="value">∞</div><div class="label">аккаунтов под контролем</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- Призыв к действию -->
+<section class="section" id="start" style="padding-top: 0;">
+  <div class="container">
+    <div class="cta reveal">
+      <h2>Готовы начать экономить время?</h2>
+      <p>Добавьте свой аккаунт Яндекса и посмотрите, как всё работает. Первое подключение займёт меньше минуты.</p>
+      <a class="btn-white" href="#">🚀 Попробовать сейчас</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container footer-inner">
+    <div class="brand" style="font-size:16px">
+      <div class="brand-mark" style="width:30px;height:30px;font-size:14px;border-radius:9px">Я</div>
+      <span>Яндекс Помощник</span>
+    </div>
+    <span>Автоматизируем рутину, чтобы вы занимались важным.</span>
+  </div>
+</footer>
+
+<script>
+  // падающие логотипы Яндекса
+  const box = document.getElementById('fallingYa');
+  const N = 14;
+  const colors = ['#ff0033', '#ff4d6d', '#ffb020', '#00b86b', '#4477ff'];
+  for (let i = 0; i < N; i++) {
+    const el = document.createElement('div');
+    el.className = 'ya-logo';
+    el.style.left = (Math.random() * 100) + '%';
+    el.style.fontSize = (16 + Math.random() * 18) + 'px';
+    el.style.animationDuration = (9 + Math.random() * 12) + 's';
+    el.style.animationDelay = (-Math.random() * 14) + 's';
+    el.style.opacity = .5 + Math.random() * .5;
+    el.innerHTML = '<span style="color:' + colors[i % colors.length] + '">Я</span>';
+    box.appendChild(el);
+  }
+
+  // появление при прокрутке
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); } });
+  }, { threshold: .15 });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+  // ---------- моушен-демо ----------
+  const scenes = document.querySelectorAll('.scene');
+  const tlItems = document.querySelectorAll('#demoTimeline li');
+  const urlEl = document.getElementById('demoUrl');
+  let demoPlaying = false, demoStep = 0, demoIdx = 0;
+
+  function showScene(n) {
+    scenes.forEach(s => s.style.display = (s.dataset.scene == n) ? '' : 'none');
+    tlItems.forEach(li => {
+      li.classList.toggle('active', li.dataset.tl == n);
+      li.classList.toggle('done', li.dataset.tl < n);
+    });
+  }
+  function setUrl(txt) { urlEl.textContent = txt; }
+
+  function resetDemo() {
+    clearTimeout(demoIdx);
+    demoPlaying = false; demoStep = 0;
+    showScene(1);
+    setUrl('⚙️ панель помощника');
+    document.getElementById('sc1Card').classList.remove('hl');
+    document.getElementById('sc1Check').style.opacity = 0;
+    document.getElementById('sc1Hint').classList.remove('show');
+    document.getElementById('sc1Btn').style.opacity = 1;
+    document.getElementById('demoPlay').textContent = '▶ Запустить демо';
+  }
+
+  function wait(ms) { return new Promise(r => { demoIdx = setTimeout(r, ms); }); }
+
+  async function playDemo() {
+    if (demoPlaying) return;
+    demoPlaying = true;
+    document.getElementById('demoPlay').textContent = '⏸ Демо идёт…';
+    showScene(1);
+    setUrl('🔗 подключаем аккаунт…');
+
+    // шаг 1: добавление аккаунта
+    document.getElementById('sc1Card').classList.add('hl');
+    await wait(800);
+    document.getElementById('sc1Hint').classList.add('show');
+    await wait(1200);
+    document.getElementById('sc1Hint').textContent = 'Аккаунт подключён! ✓';
+    document.getElementById('sc1Card').classList.remove('hl');
+    document.getElementById('sc1Check').style.opacity = 1;
+    document.getElementById('sc1Btn').style.opacity = .45;
+    await wait(1000);
+
+    // шаг 2: переход в панель
+    showScene(2);
+    setUrl('⚙️ панель помощника');
+    await wait(300);
+    document.getElementById('sc2Hint').classList.add('show');
+    await wait(1600);
+
+    // шаг 3: сканирование промокодов по аккаунтам
+    showScene(3);
+    setUrl('🎫 промокоды по аккаунтам…');
+    await wait(400);
+    document.getElementById('sc3Hint').classList.add('show');
+    document.getElementById('sc3Hint').textContent = 'Сканируем промокоды на всех аккаунтах…';
+    await wait(900);
+    for (let i = 1; i <= 6; i++) {
+      document.getElementById('ar' + i).classList.add('hl');
+      await wait(350);
+      document.getElementById('ar' + i).classList.remove('hl');
+      document.getElementById('ar' + i).classList.add('ok');
+    }
+    document.getElementById('sc3Hint').textContent = 'Промокоды найдены на всех аккаунтах ✓';
+    await wait(1000);
+
+    // шаг 4: акция за рубль по аккаунтам
+    showScene(4);
+    setUrl('🏷️ акция за 1 ₽ по аккаунтам…');
+    await wait(400);
+    document.getElementById('sc4Hint').classList.add('show');
+    document.getElementById('sc4Hint').textContent = 'Ищем акцию «за 1 ₽» на всех аккаунтах…';
+    await wait(900);
+    for (let i = 1; i <= 6; i++) {
+      document.getElementById('dl' + i).classList.add('hl');
+      await wait(350);
+      document.getElementById('dl' + i).classList.remove('hl');
+      if (document.getElementById('dl' + i).querySelector('.deal-tag.none')) continue;
+      document.getElementById('dl' + i).classList.add('ok');
+    }
+    document.getElementById('sc4Hint').textContent = 'Акция доступна на 4 аккаунтах из 6 ✓';
+    await wait(1100);
+
+    // шаг 5: подключение Плюса
+    showScene(5);
+    setUrl('✨ подключение Яндекса Плюс…');
+    await wait(400);
+    document.getElementById('sc5Hint').classList.add('show');
+    document.getElementById('sc5Hint').textContent = 'Подключаем Плюс…';
+    for (let i = 0; i <= 100; i += 5) {
+      document.getElementById('plusMeter').style.width = i + '%';
+      await wait(60);
+    }
+    document.getElementById('plusDone').classList.add('on');
+    document.getElementById('sc5Hint').textContent = 'Плюс подключён! Баллы уже копятся ✓';
+    await wait(1200);
+
+    // шаг 6: кнопка отзывов
+    showScene(6);
+    setUrl('🛒 мои покупки');
+    document.getElementById('sc3Card2').style.opacity = 0;
+    await wait(600);
+    document.getElementById('sc3Card2').style.transition = 'opacity .4s';
+    document.getElementById('sc3Card2').style.opacity = 1;
+    await wait(900);
+    document.getElementById('sc3Hint').classList.add('show');
+    document.getElementById('sc3Btn').style.opacity = 1;
+    await wait(400);
+    document.getElementById('sc3Btn').style.transform = 'scale(.94)';
+    await wait(200);
+    document.getElementById('sc3Btn').style.transform = '';
+    document.getElementById('sc3Btn').textContent = '⏳ Оставляем отзывы… 1 из 11';
+    await wait(1000);
+    document.getElementById('sc3Btn').textContent = '⏳ Оставляем отзывы… 5 из 11';
+    await wait(1000);
+    document.getElementById('sc3Btn').textContent = '⏳ Оставляем отзывы… 9 из 11';
+    await wait(900);
+    document.getElementById('sc3Btn').textContent = '✅ Все отзывы оставлены!';
+    await wait(800);
+
+    // шаг 7: результат
+    showScene(7);
+    setUrl('🎉 всё готово');
+    let c = 0;
+    for (let i = 0; i <= 11; i++) {
+      document.getElementById('demoCount').textContent = i;
+      await wait(45);
+    }
+    demoPlaying = false;
+    document.getElementById('demoPlay').textContent = '▶ Запустить демо снова';
+  }
+
+  document.getElementById('demoPlay').addEventListener('click', () => { if (!demoPlaying) playDemo(); });
+  document.getElementById('demoReset').addEventListener('click', resetDemo);
+</script>
+</body>
+</html>

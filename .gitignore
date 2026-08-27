@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime data / secrets (created at runtime, kept in Railway Volume)
+*.json
+*.json.lock
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Local / OS
+.env
+.vscode/
+.idea/
+.DS_Store
+*.ovpn
+
+# Test/scratch artifacts
+_t_*.py
+_*.txt

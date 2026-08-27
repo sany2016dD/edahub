@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Магнит — админ-панель</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="bg-decoration" aria-hidden="true">
+  <div class="bg-grid"></div>
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+</div>
+
+<div class="container wide">
+  <header class="header">
+    <div class="logo">
+      <div class="logo-badge">М</div>
+      <div>
+        <h1>Админ-панель <span class="tag">база данных</span></h1>
+        <p class="subtitle">Аккаунты · покупки · купоны · призы · сессии · доставка</p>
+      </div>
+    </div>
+    <div class="header-btns">
+      <button class="btn btn-ghost" id="btnRefresh">↻ Обновить</button>
+      <button class="btn btn-primary" id="btnAdd">+ Добавить аккаунт</button>
+    </div>
+  </header>
+
+  <section class="stats-row stats-4">
+    <div class="stat-card">
+      <div class="stat-icon">👤</div>
+      <div>
+        <div class="stat-num" id="statTotal">–</div>
+        <div class="stat-label">аккаунтов</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon green">▶</div>
+      <div>
+        <div class="stat-num" id="statActive">–</div>
+        <div class="stat-label">играют сейчас</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon blue">🏆</div>
+      <div>
+        <div class="stat-num" id="statPrizes">–</div>
+        <div class="stat-label">всего призов</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:var(--green-soft);border-color:rgba(47,209,124,.25)">🛒</div>
+      <div>
+        <div class="stat-num" id="statOrders">–</div>
+        <div class="stat-label">заказов (архив)</div>
+      </div>
+    </div>
+  </section>
+
+  <nav class="db-tabs" id="dbTabs">
+    <button class="db-tab active" data-tab="accounts">👤 Аккаунты</button>
+    <button class="db-tab" data-tab="purchases">🛒 Покупки</button>
+    <button class="db-tab" data-tab="coupons">🎟️ Купоны</button>
+    <button class="db-tab" data-tab="prizes">🏆 Призы</button>
+    <button class="db-tab" data-tab="sessions">🔑 Сессии</button>
+    <button class="db-tab" data-tab="card">💳 Моя карта</button>
+    <button class="db-tab" data-tab="eda">🚚 ЕДА</button>
+    <button class="db-tab" data-tab="edaPromo">🎁 Промокоды</button>
+    <button class="db-tab" data-tab="auto">🛍 Автозаказ</button>
+    <button class="db-tab" data-tab="sp">🅿 Свои Плюсы</button>
+    <button class="db-tab" data-tab="samokat">🛴 Самокат</button>
+    <button class="db-tab" data-tab="market">🛒 Маркет</button>
+    <button class="db-tab" data-tab="users">👥 Пользователи</button>
+  </nav>
+
+  <!-- ================= Аккаунты ================= -->
+  <section class="db-pane active" id="pane-accounts">
+    <div class="db-toolbar">
+      <input type="search" id="accSearch" class="db-search" placeholder="Поиск по имени или устройству…">
+      <select id="accGameFilter" class="db-search" style="max-width:200px">
+        <option value="">Все игры</option>
+        <option value="pBvsPKf7hGXlGBg5zBnsn">Суперпризы от М.косметик</option>
+        <option value="At99RuZXsCpnFRhpmEZCK">Монстро-планетяне</option>
+      </select>
+      <span class="db-count" id="accCount"></span>
+      <span class="db-spacer"></span>
+      <button class="btn btn-primary btn-sm" id="accPlayAll">▶ Играть на всех</button>
+      <button class="btn btn-ghost btn-sm" id="accCsv">Скачать CSV</button>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table" id="accTable">
+        <thead>
+          <tr>
+            <th>Аккаунт</th>
+            <th>Игра</th>
+            <th>Попытки</th>
+            <th>Уровень</th>
+            <th>Бонусы</th>
+            <th>Призов</th>
+            <th>Статус</th>
+            <th class="col-actions">Действия</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= Покупки ================= -->
+  <section class="db-pane" id="pane-purchases">
+    <div class="db-toolbar">
+      <span class="db-count" id="purCount"></span>
+      <span class="db-spacer"></span>
+      <button class="btn btn-ghost btn-sm" id="purCsv">Скачать CSV</button>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table" id="purTable">
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Аккаунт</th>
+            <th>Тип</th>
+            <th>Название</th>
+            <th>Статус / категория</th>
+            <th>Сумма / код</th>
+            <th class="col-actions">Действия</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= Купоны ================= -->
+  <section class="db-pane" id="pane-coupons">
+    <div class="db-toolbar">
+      <span class="db-count" id="cpnCount"></span>
+      <span class="db-spacer"></span>
+      <button class="btn btn-ghost btn-sm" id="cpnCsv">Скачать CSV</button>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table" id="cpnTable">
+        <thead>
+          <tr>
+            <th>Аккаунт</th>
+            <th>Купон</th>
+            <th>Код</th>
+            <th>Скидка</th>
+            <th>Действует до</th>
+            <th class="col-actions">Действия</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="sd-section"><h3>Создать ссылку на купон</h3>
+      <div class="access-form">
+        <label>Аккаунт
+          <select id="cpnAccount"></select>
+        </label>
+        <label>Купон (favoriteId)
+          <input type="text" id="cpnId" placeholder="или код из списка выше">
+        </label>
+        <label>Срок, часов
+          <input type="number" id="cpnHours" value="24" min="1">
+        </label>
+        <button class="btn btn-primary" id="cpnCreate">Создать ссылку</button>
+      </div>
+    </div>
+    <div class="sd-section"><h3>Созданные ссылки</h3><div id="cpnShares" class="sessions-list"></div></div>
+  </section>
+
+  <!-- ================= Призы ================= -->
+  <section class="db-pane" id="pane-prizes">
+    <div class="db-toolbar">
+      <span class="db-count" id="przCount"></span>
+      <span class="db-spacer"></span>
+      <button class="btn btn-ghost btn-sm" id="przCsv">Скачать CSV</button>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table" id="przTable">
+        <thead>
+          <tr>
+            <th>Получен</th>
+            <th>Аккаунт</th>
+            <th>Приз</th>
+            <th>Категория</th>
+            <th>Код</th>
+            <th>Уровень</th>
+            <th class="col-actions">Действия</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= Сессии ================= -->
+  <section class="db-pane" id="pane-sessions">
+    <div class="sd-section"><h3>Новая сессия доступа</h3>
+      <div class="access-form">
+        <label>Имя человека
+          <input type="text" id="accName" placeholder="например: Вася">
+        </label>
+        <label>Аккаунт Магнита
+          <select id="accAccount"></select>
+        </label>
+        <label>Срок действия, часов
+          <input type="number" id="accHours" value="24" min="1">
+        </label>
+        <label>Что доступно
+          <select id="accMode">
+            <option value="both">Самовывоз + Доставка</option>
+            <option value="pickup">Только самовывоз</option>
+            <option value="delivery">Только доставка</option>
+            <option value="card">Только «Моя карта»</option>
+          </select>
+        </label>
+        <button class="btn btn-primary" id="accCreate">Создать сессию</button>
+      </div>
+    </div>
+    <div class="sd-section"><h3>Активные сессии</h3><div id="sessionsList" class="sessions-list"></div></div>
+  </section>
+
+  <!-- ================= Моя карта ================= -->
+  <section class="db-pane" id="pane-card">
+    <div class="db-toolbar">
+      <label style="display:flex;align-items:center;gap:8px">Аккаунт
+        <select id="cardAccount" class="db-search" style="max-width:240px"></select>
+      </label>
+      <button class="btn btn-primary btn-sm" id="cardShow">Показать карту</button>
+      <button class="btn btn-ghost btn-sm" id="cardShare">Выдать сессию на карту</button>
+      <span class="db-mut" id="cardStatus"></span>
+    </div>
+    <div id="cardView" class="sd-section" style="margin-top:8px">
+      <div class="hint" style="padding:24px">Выберите аккаунт и нажмите «Показать карту»</div>
+    </div>
+  </section>
+
+  <!-- ================= ЕДА ================= -->
+  <section class="db-pane" id="pane-eda">
+    <div class="db-tabs sub">
+      <button class="db-tab active" data-tab="edaAccs">Аккаунты Еды</button>
+      <button class="db-tab" data-tab="edaSess">Сессии Еды</button>
+    </div>
+    <div class="db-pane active" id="pane-edaAccs">
+      <div class="eda-add">
+        <div class="eda-add-qr">
+          <a class="btn btn-primary btn-sm" href="/qr" target="_blank">Вход по QR</a>
+          <span class="db-mut">ссылка вместо сканирования — новый аккаунт добавится сам</span>
+        </div>
+        <div class="eda-reg-row" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+          <span class="db-mut">Авторегистрация:</span>
+          <label style="margin:0">Имя <input type="text" id="edaRegName" placeholder="например omsk1" autocomplete="off"></label>
+          <label style="margin:0">Кол-во <input type="number" id="edaRegCount" value="1" min="1" style="width:60px"></label>
+          <button class="btn btn-primary btn-sm" id="edaRegStart">🚀 Регистрация</button>
+          <span class="db-mut" id="edaRegMsg"></span>
+        </div>
+        <label>Имя аккаунта
+          <input type="text" id="edaName" placeholder="например: omsk1" autocomplete="off">
+        </label>
+        <label>Bearer-токен
+          <input type="text" id="edaToken" placeholder="2.uid.token или webviewtoken=..." autocomplete="off">
+        </label>
+        <label>yandexuid (можно пусто)
+          <input type="text" id="edaUid" placeholder="passport uid" autocomplete="off">
+        </label>
+        <label>Session_id (если нет токена)
+          <input type="text" id="edaSid" placeholder="Session_id из куки Яндекс.Еды" autocomplete="off">
+        </label>
+        <button class="btn btn-primary" id="edaAccAdd">Добавить аккаунт</button>
+      </div>
+      <div class="db-toolbar" style="margin-top:16px">
+        <button class="btn btn-ghost btn-sm" id="edaCheckRun">🔄 Проверить токены</button>
+        <button class="btn btn-primary btn-sm" id="edaWarmupRun">🔥 Прогрев (22 мин)</button>
+        <span class="db-mut" id="edaCheckMsg2"></span>
+      </div>
+      <div class="eda-promo-progress hidden" id="edaCheckProgress">
+        <div class="eda-promo-bar"><div class="eda-promo-fill" id="edaCheckFill"></div></div>
+        <span class="db-mut" id="edaCheckMsg"></span>
+      </div>
+      <div id="edaCheckResult" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px"></div>
+      <div class="table-wrap" style="margin-top:16px">
+        <table class="data-table" id="edaAccTable">
+          <thead><tr><th>Имя</th><th>Профиль</th><th>Плюс</th><th>uid</th><th>Токен</th><th>Сессия</th><th>Устройство</th><th>Готов через</th><th>Заказы</th><th>Добавлен</th><th class="col-actions">Действия</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="db-pane" id="pane-edaSess">
+      <div class="access-form">
+        <label>Имя человека
+          <input type="text" id="edaSessName" placeholder="например: Вася" autocomplete="off">
+        </label>
+        <label>Аккаунт Я.Еды
+          <select id="edaSessAccount"></select>
+        </label>
+        <label>Срок действия, часов
+          <input type="number" id="edaSessHours" value="24" min="1">
+        </label>
+        <button class="btn btn-primary" id="edaSessCreate">Создать сессию</button>
+      </div>
+      <div class="table-wrap" style="margin-top:16px">
+        <table class="data-table" id="edaSessTable">
+          <thead><tr><th>Имя</th><th>Аккаунт</th><th>Ссылка</th><th>Ключ продажи</th><th>Прокси</th><th>Истекает</th><th class="col-actions">Действия</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= Чекер промокодов ================= -->
+  <section class="db-pane" id="pane-edaPromo">
+    <div class="db-toolbar">
+      <button class="btn btn-primary btn-sm" id="edaPromoRun">🔍 Проверить все аккаунты</button>
+      <span class="db-count" id="edaPromoCount"></span>
+    </div>
+    <div class="eda-promo-progress hidden" id="edaPromoProgress">
+      <div class="eda-promo-bar"><div class="eda-promo-fill" id="edaPromoFill"></div></div>
+      <span class="db-mut" id="edaPromoMsg"></span>
+    </div>
+    <div class="table-wrap" style="margin-top:16px">
+      <table class="data-table" id="edaPromoTable">
+        <thead><tr><th>Аккаунт</th><th>Промокоды</th><th>Ошибка</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= Свои Плюсы: ежедневные подарки ================= -->
+  <section class="db-pane" id="pane-sp">
+    <div class="db-toolbar">
+      <button class="btn btn-primary btn-sm" id="spRun">🎁 Собрать подарки</button>
+      <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="spClaim" checked> активировать промокоды</label>
+      <span class="db-count" id="spCount"></span>
+      <span class="db-spacer"></span>
+      <button class="btn btn-ghost btn-sm" id="spCsv">Скачать CSV</button>
+    </div>
+    <div class="eda-promo-progress hidden" id="spProgress">
+      <div class="eda-promo-bar"><div class="eda-promo-fill" id="spFill"></div></div>
+      <span class="db-mut" id="spMsg"></span>
+    </div>
+    <div class="table-wrap" style="margin-top:16px">
+      <table class="data-table" id="spTable">
+        <thead><tr><th>Аккаунт</th><th>Подарок</th><th>Статус</th><th>Промокод</th><th>Действует до</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Колесо Фортуны -->
+    <div class="db-toolbar" style="margin-top:24px">
+      <button class="btn btn-primary btn-sm" id="spWheelRun">🎡 Крутить колесо</button>
+      <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="spWheelSpin" checked> крутить (потратить попытку)</label>
+      <span class="db-count" id="spWheelCount"></span>
+    </div>
+    <div class="eda-promo-progress hidden" id="spWheelProgress">
+      <div class="eda-promo-bar"><div class="eda-promo-fill" id="spWheelFill"></div></div>
+      <span class="db-mut" id="spWheelMsg"></span>
+    </div>
+    <div class="table-wrap" style="margin-top:16px">
+      <table class="data-table" id="spWheelTable">
+        <thead><tr><th>Аккаунт</th><th>Приз</th><th>Кешбэк</th><th>Статус</th><th>Действует до</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= Автозаказ Я.Еды ================= -->
+  <section class="db-pane" id="pane-auto">
+    <div class="db-toolbar">
+      <label style="display:flex;align-items:center;gap:6px">Аккаунт
+        <select id="azAccount" class="db-search" style="max-width:240px"></select>
+      </label>
+      <label style="display:flex;align-items:center;gap:6px">Город
+        <select id="azCity" class="db-search" style="max-width:200px"></select>
+      </label>
+      <label style="display:flex;align-items:center;gap:6px">Адрес
+        <select id="azAddr" class="db-search" style="max-width:300px"></select>
+      </label>
+      <span class="db-spacer"></span>
+      <span class="db-count" id="azCartTotal"></span>
+    </div>
+    <div class="eda-add" style="grid-template-columns:1fr 1fr 1fr 1fr">
+      <label>Квартира
+        <input type="text" id="azFlat" placeholder="45" autocomplete="off">
+      </label>
+      <label>Подъезд
+        <input type="text" id="azEntrance" placeholder="2" autocomplete="off">
+      </label>
+      <label>Этаж
+        <input type="text" id="azFloor" placeholder="5" autocomplete="off">
+      </label>
+      <label>Домофон
+        <input type="text" id="azIntercom" placeholder="1234" autocomplete="off">
+      </label>
+    </div>
+    <div class="db-toolbar" style="margin-top:12px">
+      <input type="search" id="azSearch" class="db-search" placeholder="Поиск ресторана/магазина…" style="max-width:320px">
+      <button class="btn btn-primary btn-sm" id="azSearchGo">🔍 Найти</button>
+      <button class="btn btn-ghost btn-sm" id="azCardsBtn">💳 Карты</button>
+      <button class="btn btn-ghost btn-sm" id="azCartShow">🛒 Корзина</button>
+      <button class="btn btn-ghost btn-sm" id="azClear">Очистить выбор</button>
+      <span class="db-mut" id="azStatus"></span>
+    </div>
+    <div id="azBody"><div class="hint" style="padding:24px">Выберите аккаунт — загружу его адреса и корзину</div></div>
+  </section>
+
+  <!-- ================= Самокат ================= -->
+  <section class="db-pane" id="pane-samokat">
+    <div class="db-tabs sub">
+      <button class="db-tab active" data-tab="skAccs">Аккаунты Самоката</button>
+      <button class="db-tab" data-tab="skSess">Сессии Самоката</button>
+    </div>
+    <div class="db-pane active" id="pane-skAccs">
+      <div class="eda-add">
+        <label>Имя аккаунта
+          <input type="text" id="skName" placeholder="например: omsk1" autocomplete="off">
+        </label>
+        <label>Номер телефона (вход по SMS)
+          <input type="text" id="skPhone" placeholder="+7 912 345-67-89" autocomplete="off">
+        </label>
+        <button class="btn btn-primary" id="skSmsSend">1. Отправить SMS-код</button>
+        <label>SMS-код
+          <input type="text" id="skSmsCode" placeholder="код из СМС" autocomplete="off">
+        </label>
+        <button class="btn btn-primary" id="skSmsConfirm">2. Подтвердить и сохранить аккаунт</button>
+      </div>
+      <div class="eda-add">
+        <label style="width:100%">Или вставьте куки веб-сессии samokat.ru
+          <textarea id="skCookies" rows="4" placeholder="__Secure-next-auth.session-token=...; spjs=...; DEVICE_ID_KEY=... (куки из браузера, весь заголовок Cookie)" autocomplete="off"></textarea>
+        </label>
+        <button class="btn btn-primary" id="skAccAdd">Добавить аккаунт по кукам</button>
+      </div>
+      <div class="table-wrap" style="margin-top:16px">
+        <table class="data-table" id="skAccTable">
+          <thead><tr><th>Имя</th><th>Пользователь</th><th>Сессия</th><th>Добавлен</th><th class="col-actions">Действия</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="db-pane" id="pane-skSess">
+      <div class="access-form">
+        <label>Имя человека
+          <input type="text" id="skSessName" placeholder="например: Вася" autocomplete="off">
+        </label>
+        <label>Аккаунт Самоката
+          <select id="skSessAccount"></select>
+        </label>
+        <label>Срок действия, часов
+          <input type="number" id="skSessHours" value="24" min="1">
+        </label>
+        <button class="btn btn-primary" id="skSessCreate">Создать сессию</button>
+      </div>
+      <div class="table-wrap" style="margin-top:16px">
+        <table class="data-table" id="skSessTable">
+          <thead><tr><th>Имя</th><th>Аккаунт</th><th>Ссылка</th><th>Истекает</th><th class="col-actions">Действия</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= Маркет ================= -->
+  <section class="db-pane" id="pane-market">
+    <div class="db-tabs sub">
+      <button class="db-tab active" data-tab="mktWow">🔥 Акции за 1₽</button>
+    </div>
+    <div class="db-pane active" id="pane-mktWow">
+      <div class="eda-add">
+        <button class="btn btn-primary" id="mktWowScan">🔍 Сканировать все аккаунты</button>
+        <span class="db-count" id="mktWowCount"></span>
+      </div>
+      <div class="eda-add" style="margin-top:10px">
+        <label>Текст отзыва
+          <input type="text" id="mktReviewText" placeholder="Товар соответствует описанию. Доставка быстрая." style="width:100%">
+        </label>
+        <label style="margin-left:8px">Оценка
+          <input type="number" id="mktReviewGrade" value="5" min="1" max="5" style="width:60px">
+        </label>
+        <button class="btn btn-primary" id="mktReviewBtn">✍️ Оставить отзывы на всех аккаунтах</button>
+      </div>
+      <div class="eda-add" style="margin-top:10px">
+        <label>URL для сканирования (оставьте пустым для URL по умолчанию)
+          <input type="text" id="mktWowUrl" placeholder="https://market.yandex.ru/page/wow_offers?..." style="width:100%">
+        </label>
+        <button class="btn btn-primary" id="mktWowScanUrl">🔗 Сканировать по URL</button>
+      </div>
+      <div class="table-wrap" style="margin-top:16px">
+        <table class="data-table" id="mktWowTable">
+          <thead>
+            <tr>
+              <th>Аккаунт</th>
+              <th>Статус</th>
+              <th>Прогрев</th>
+              <th class="col-actions">Действия</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="mktWowResults" style="margin-top:16px"></div>
+      <div id="mktReviewLog" class="mkt-log" style="margin-top:16px;display:none"></div>
+    </div>
+  </section>
+
+  <!-- ================= Пользователи ================= -->
+  <section class="db-pane" id="pane-users">
+    <div class="eda-add" style="margin-bottom:16px">
+      <h3 style="margin:0;font-size:15px">Управление пользователями</h3>
+    </div>
+    <div class="card" style="padding:16px;margin-bottom:16px;background:var(--panel);border:1px solid var(--border);border-radius:14px">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <label style="font-size:12px;color:var(--muted)">Логин
+          <input type="text" id="usrLogin" class="db-search" placeholder="login" autocomplete="off" style="margin-top:4px">
+        </label>
+        <label style="font-size:12px;color:var(--muted)">Пароль
+          <input type="text" id="usrPassword" class="db-search" placeholder="password" autocomplete="off" style="margin-top:4px">
+        </label>
+        <label style="font-size:12px;color:var(--muted)">Роль
+          <select id="usrRole" class="db-search" style="margin-top:4px;width:140px">
+            <option value="courier">Курьер</option>
+            <option value="demo">Демо</option>
+            <option value="admin">Админ</option>
+          </select>
+        </label>
+        <button class="btn btn-primary btn-sm" id="usrCreate">Создать</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table" id="usrTable">
+        <thead>
+          <tr>
+            <th>Логин</th>
+            <th>Роль</th>
+            <th>Ключ доступа</th>
+            <th>Создан</th>
+            <th class="col-actions">Действия</th>
+          </tr>
+        </thead>
+        <tbody id="usrBody"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<!-- Add account modal -->
+<div class="modal-overlay hidden" id="modalAdd">
+  <div class="modal">
+    <button class="modal-close" id="modalClose">×</button>
+    <h2 id="modalTitle">Добавить аккаунт</h2>
+    <div class="add-tabs">
+      <button class="tab active" id="tabRegister">Новый аккаунт</button>
+      <button class="tab" id="tabToken">По токену</button>
+      <button class="tab" id="tabLogin">Вход (есть аккаунт)</button>
+    </div>
+    <p class="muted">Пришлём SMS-код на номер телефона</p>
+    <form id="formAdd">
+      <label>Номер телефона
+        <input type="text" id="addPhone" placeholder="7 912 345-67-89" autocomplete="off">
+      </label>
+      <div id="fieldsRegister">
+        <label>Имя аккаунта
+          <input type="text" id="addName" placeholder="например: vasya" autocomplete="off">
+        </label>
+        <label>Имя пользователя
+          <input type="text" id="addFirstName" placeholder="Иван" autocomplete="off">
+        </label>
+        <label>Дата рождения
+          <input type="date" id="addBirth" value="2000-01-01">
+        </label>
+        <label>Игра
+          <select id="addEvent">
+            <option value="pBvsPKf7hGXlGBg5zBnsn">Суперпризы от М.косметик</option>
+            <option value="At99RuZXsCpnFRhpmEZCK">Монстро-планетяне</option>
+          </select>
+        </label>
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">Отправить SMS</button>
+    </form>
+    <form id="formToken" class="hidden">
+      <label>Имя аккаунта
+        <input type="text" id="tokName" placeholder="например: vasya" autocomplete="off">
+      </label>
+      <label>Refresh-токен Магнита
+        <input type="password" id="tokRefresh" placeholder="вставьте refresh token из приложения Магнит" autocomplete="off">
+      </label>
+      <label>Игра
+        <select id="tokEvent">
+          <option value="pBvsPKf7hGXlGBg5zBnsn">Суперпризы от М.косметик</option>
+          <option value="At99RuZXsCpnFRhpmEZCK">Монстро-планетяне</option>
+        </select>
+      </label>
+      <p class="muted" style="margin:4px 0 14px">Вход по SMS для существующих аккаунтов сервер Магнита блокирует (<code>untrustedDevice</code>), поэтому нужен refresh-токен. Он есть в приложении: Логин в Магнит → запросы <code>/v1/auth/token/refresh</code> → поле <code>refreshToken</code>.</p>
+      <button type="submit" class="btn btn-primary btn-block">Добавить аккаунт</button>
+    </form>
+    <div class="modal-step hidden" id="stepConfirm">
+      <p class="muted">Введите код из SMS</p>
+      <form id="formConfirm">
+        <label>Код
+          <input type="text" id="confirmCode" placeholder="0000" autocomplete="one-time-code" inputmode="numeric" maxlength="6">
+        </label>
+        <button type="submit" class="btn btn-primary btn-block">Подтвердить</button>
+      </form>
+    </div>
+    <div class="modal-error hidden" id="modalError"></div>
+  </div>
+</div>
+
+<!-- Log modal -->
+<div class="modal-overlay hidden" id="modalLogs">
+  <div class="modal modal-wide">
+    <button class="modal-close" id="logsClose">×</button>
+    <h2 id="logsTitle">Логи</h2>
+    <pre class="logs" id="logsBody"></pre>
+  </div>
+</div>
+
+<!-- Prizes modal -->
+<div class="modal-overlay hidden" id="modalPrizes">
+  <div class="modal modal-wide">
+    <button class="modal-close" id="prizesClose">×</button>
+    <div class="prizes-head">
+      <h2 id="prizesTitle">Призы</h2>
+      <button class="btn btn-ghost btn-sm" id="prizesSync">↻ Синхронизировать</button>
+    </div>
+    <div class="prizes-stats" id="prizesStats"></div>
+    <div class="prizes-list" id="prizesList"></div>
+  </div>
+</div>
+
+<!-- Session detail modal -->
+<div class="modal-overlay hidden" id="modalSess">
+  <div class="modal session-detail">
+    <button class="modal-close" id="sessClose">×</button>
+    <div id="sessBody"><div class="muted">Загрузка…</div></div>
+  </div>
+</div>
+
+<!-- Выбор/ввод карты для подключения Плюса -->
+<div class="modal-overlay hidden" id="modalCard">
+  <div class="modal modal-card">
+    <button class="modal-close" id="cardClose">×</button>
+    <h2>Карта для подписки</h2>
+    <p class="muted">Выбери сохранённую карту или добавь новую — она сохранится для следующего раза.</p>
+
+    <div class="card-list" id="cardList"></div>
+
+    <div class="card-add-divider">
+      <span>или новая карта</span>
+    </div>
+    <div class="card-form">
+      <label>Номер карты
+        <input type="text" id="cardNumber" placeholder="4276 4013 9880 1234" inputmode="numeric" maxlength="23" autocomplete="cc-number" spellcheck="false">
+      </label>
+      <div class="card-row">
+        <label>Срок действия
+          <div class="card-exp">
+            <input type="text" id="cardExpMonth" placeholder="ММ" inputmode="numeric" maxlength="2" autocomplete="cc-exp-month" spellcheck="false">
+            <span class="card-exp-sep">/</span>
+            <input type="text" id="cardExpYear" placeholder="ГГ" inputmode="numeric" maxlength="2" autocomplete="cc-exp-year" spellcheck="false">
+          </div>
+        </label>
+        <label>CVC
+          <input type="text" id="cardCvc" placeholder="CVC" inputmode="numeric" maxlength="4" autocomplete="cc-csc" spellcheck="false">
+        </label>
+      </div>
+      <label>Метка (необязательно)
+        <input type="text" id="cardLabel" placeholder="например: моя Tinkoff" autocomplete="off">
+      </label>
+      <button class="btn btn-primary btn-block" id="cardSave">Сохранить и подключить</button>
+    </div>
+    <div class="modal-error hidden" id="cardError"></div>
+  </div>
+</div>
+
+<!-- Прокси для сессии -->
+<div class="modal-overlay hidden" id="modalProxy">
+  <div class="modal">
+    <button class="modal-close" id="proxyClose">×</button>
+    <h2>🌐 Прокси для сессии</h2>
+    <p class="muted" id="proxySessName"></p>
+
+    <div class="proxy-current">
+      <label>Текущий прокси
+        <input type="text" id="proxyUrl" placeholder="ip:port:login:password" autocomplete="off">
+      </label>
+      <div class="proxy-row">
+        <button class="btn btn-primary btn-sm" id="proxyCheck">Проверить IP</button>
+        <button class="btn btn-primary btn-sm" id="proxySave">Сохранить</button>
+        <button class="btn btn-ghost btn-sm" id="proxyClear">Без прокси</button>
+      </div>
+      <div class="proxy-ip" id="proxyIp"></div>
+    </div>
+
+    <div class="proxy-saved">
+      <h3>Сохранённые прокси</h3>
+      <div class="proxy-list" id="proxyList"></div>
+      <div class="proxy-add">
+        <input type="text" id="proxyNewName" placeholder="Название (необязательно)" autocomplete="off">
+        <input type="text" id="proxyNewUrl" placeholder="ip:port:login:password" autocomplete="off">
+        <button class="btn btn-ghost btn-sm" id="proxyAdd">Добавить в список</button>
+      </div>
+    </div>
+    <div class="modal-error hidden" id="proxyError"></div>
+  </div>
+</div>
+
+<script src="/static/js/qrcode.min.js"></script>
+<script src="/static/app.js"></script>
+<script>
+(function(){
+  function api(url, opts) {
+    return fetch(url, Object.assign({headers:{'Content-Type':'application/json'}}, opts||{}))
+      .then(r => r.json());
+  }
+  async function loadUsers() {
+    try {
+      const d = await api('/api/admin/users');
+      const tbody = document.getElementById('usrBody');
+      if (!tbody) return;
+      const users = d.users || [];
+      tbody.innerHTML = users.map(u => {
+        const masked = u.key ? u.key.slice(0,8) + '••••' + u.key.slice(-4) : '—';
+        return `<tr>
+          <td><b>${esc(u.login)}</b></td>
+          <td>${esc(u.role)}</td>
+          <td class="num-blur" title="${esc(u.key)}" style="cursor:pointer;font-family:monospace;font-size:12px">${esc(masked)}</td>
+          <td style="font-size:12px;color:var(--muted)">${esc(u.created||'')}</td>
+          <td>
+            <button class="btn btn-ghost btn-sm usr-copy" data-key="${esc(u.key)}" title="Скопировать ключ">📋</button>
+            <button class="btn btn-ghost btn-sm usr-regen" data-login="${esc(u.login)}" title="Перегенерировать ключ">🔄</button>
+            <button class="btn btn-ghost btn-sm usr-del" data-login="${esc(u.login)}" title="Удалить" style="color:var(--danger)">✕</button>
+          </td>
+        </tr>`;
+      }).join('');
+      tbody.querySelectorAll('.usr-copy').forEach(b => b.addEventListener('click', () => {
+        navigator.clipboard.writeText(b.dataset.key);
+        b.textContent = '✅';
+        setTimeout(() => b.textContent = '📋', 1500);
+      }));
+      tbody.querySelectorAll('.usr-regen').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('Перегенерировать ключ для ' + b.dataset.login + '?')) return;
+        const d = await api('/api/admin/users/'+encodeURIComponent(b.dataset.login)+'/regen-key', {method:'POST'});
+        if (d.ok) alert('Новый ключ: ' + d.key);
+        loadUsers();
+      }));
+      tbody.querySelectorAll('.usr-del').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('Удалить ' + b.dataset.login + '?')) return;
+        await api('/api/admin/users/'+encodeURIComponent(b.dataset.login), {method:'DELETE'});
+        loadUsers();
+      }));
+    } catch(e) {}
+  }
+  function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+  document.getElementById('usrCreate').addEventListener('click', async () => {
+    const login = document.getElementById('usrLogin').value.trim();
+    const password = document.getElementById('usrPassword').value.trim();
+    const role = document.getElementById('usrRole').value;
+    if (!login || !password) { alert('Заполните логин и пароль'); return; }
+    const d = await api('/api/admin/users', {method:'POST', body:JSON.stringify({login,password,role})});
+    if (d.error) { alert(d.error); return; }
+    document.getElementById('usrLogin').value = '';
+    document.getElementById('usrPassword').value = '';
+    alert('Пользователь создан!\nЛогин: ' + login + '\nКлюч: ' + d.user.key);
+    loadUsers();
+  });
+  // Load users when the tab is clicked
+  const usersTab = document.querySelector('[data-tab="users"]');
+  if (usersTab) usersTab.addEventListener('click', loadUsers);
+})();
+</script>
+</body>
+</html>

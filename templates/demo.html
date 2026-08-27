@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Демо-панель</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#f3f4f7;--surface:#fff;--surface-2:#f6f7f9;--text:#1a1a1a;--muted:#7b7f89;--line:#e7e8ed;
+  --brand:#fc3f1d;--brand-soft:rgba(252,63,29,.08);--good:#2fd17c;--good-soft:rgba(47,209,124,.1);
+  --warn:#e08a00;--warn-soft:rgba(224,138,0,.1);--shadow:0 8px 24px rgba(20,20,25,.08);
+  --radius:18px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Manrope',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+
+/* ===== Login Gate ===== */
+.login-gate{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.login-card{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:40px 36px;max-width:400px;width:100%;text-align:center}
+.login-card .logo{font-size:28px;font-weight:800;background:linear-gradient(135deg,#fc3f1d,#ff7a1a);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px}
+.login-card .sub{color:var(--muted);font-size:13.5px;margin-bottom:28px}
+.login-card .field{position:relative;margin-bottom:16px}
+.login-card .field input{width:100%;padding:14px 16px;border:1.5px solid var(--line);border-radius:12px;font-family:inherit;font-size:14px;font-weight:600;outline:none;transition:border .2s}
+.login-card .field input:focus{border-color:var(--brand)}
+.login-card .field input.error{border-color:var(--brand);animation:shake .4s}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.login-card .err{color:var(--brand);font-size:12.5px;font-weight:600;margin-bottom:12px;min-height:18px}
+.btn{border:none;cursor:pointer;border-radius:12px;padding:13px 20px;font-family:inherit;font-size:14px;font-weight:700;transition:all .15s}
+.btn:active{transform:scale(.97)}
+.btn-brand{background:var(--brand);color:#fff;width:100%}
+.btn-brand:disabled{opacity:.5;cursor:default}
+.btn-ghost{background:var(--surface-2);color:var(--text);border:1.5px solid var(--line)}
+.btn-good{background:var(--good);color:#fff}
+.btn-sm{padding:9px 14px;font-size:12.5px;border-radius:10px}
+.hidden{display:none !important}
+
+/* ===== Dashboard ===== */
+.dash{display:none;min-height:100vh}
+.dash.active{display:block}
+.dash-head{background:linear-gradient(135deg,#fc3f1d,#ff7a1a);color:#fff;padding:18px 24px;display:flex;align-items:center;justify-content:space-between}
+.dash-head h1{font-size:18px;font-weight:800}
+.dash-head .logout{background:rgba(255,255,255,.2);color:#fff;border:none;padding:8px 16px;border-radius:10px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
+.dash-head .logout:hover{background:rgba(255,255,255,.35)}
+.dash-body{max-width:960px;margin:0 auto;padding:24px 16px}
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media(max-width:720px){.dash-grid{grid-template-columns:1fr}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow)}
+.card h2{font-size:15px;font-weight:800;margin-bottom:10px}
+.muted{color:var(--muted);font-size:12.5px;line-height:1.5}
+
+/* ===== QR Section ===== */
+.qr-area{text-align:center}
+.qr-box{display:inline-flex;align-items:center;justify-content:center;background:#fff;border:1.5px solid var(--line);border-radius:16px;padding:16px;margin:14px auto;min-width:240px;min-height:240px}
+.qr-box canvas{display:block}
+.qr-status{display:flex;align-items:center;gap:10px;justify-content:center;min-height:28px;margin-top:12px;font-size:13px;font-weight:600}
+.qr-link-box{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px auto;word-break:break-all;font-family:ui-monospace,monospace;font-size:11.5px;color:var(--muted);text-align:left;max-width:320px}
+.qr-actions{gap:8px;justify-content:center;margin-top:10px}
+.spin{width:16px;height:16px;border-radius:50%;border:2.5px solid var(--line);border-top-color:var(--brand);animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.qr-hint{color:var(--muted);font-size:12px;margin-top:6px}
+
+/* ===== Accounts list ===== */
+.acc-list{max-height:520px;overflow-y:auto}
+.acc-empty{color:var(--muted);font-size:13px;padding:20px 0;text-align:center}
+.acc-item{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;margin-bottom:10px;transition:box-shadow .15s}
+.acc-item:hover{box-shadow:0 2px 12px rgba(0,0,0,.06)}
+.acc-avatar{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#fc3f1d,#ff7a1a);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:15px;flex-shrink:0}
+.acc-info{flex:1;min-width:0}
+.acc-name{font-weight:700;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acc-meta{color:var(--muted);font-size:11.5px;margin-top:2px}
+.acc-bonus{background:var(--good-soft);color:#1c9d5c;padding:4px 10px;border-radius:8px;font-size:12px;font-weight:700;white-space:nowrap}
+.acc-del{background:none;border:none;color:var(--muted);cursor:pointer;padding:4px;font-size:16px;opacity:.5;transition:opacity .15s}
+.acc-del:hover{opacity:1;color:var(--brand)}
+
+/* ===== Reg Simulation Overlay ===== */
+.overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.55);z-index:100;display:none;align-items:center;justify-content:center;padding:16px}
+.overlay.active{display:flex}
+.reg-card{background:var(--surface);border-radius:24px;max-width:440px;width:100%;padding:32px 28px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.25);position:relative;overflow:hidden}
+.reg-card::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--brand),#ff7a1a)}
+.reg-card h2{font-size:18px;font-weight:800;margin-bottom:4px}
+.reg-card .reg-sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+
+/* Phone mockup */
+.phone{width:220px;margin:0 auto 24px;background:#1a1a1a;border-radius:28px;padding:8px;box-shadow:0 8px 30px rgba(0,0,0,.2)}
+.phone-screen{background:#fff;border-radius:22px;overflow:hidden;min-height:320px}
+.phone-notch{height:22px;background:#1a1a1a;position:relative}
+.phone-notch::after{content:'';position:absolute;top:6px;left:50%;transform:translateX(-50%);width:50px;height:10px;background:#2a2a2a;border-radius:10px}
+.ps-body{padding:16px 14px}
+.ps-yandex{font-size:20px;font-weight:800;color:var(--brand);margin-bottom:12px}
+.ps-step{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:12px;color:#999}
+.ps-step.active{color:var(--text);font-weight:600}
+.ps-step.done{color:var(--good);font-weight:600}
+.ps-dot{width:20px;height:20px;border-radius:50%;border:2px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0}
+.ps-step.active .ps-dot{border-color:var(--brand);animation:pulse 1.2s infinite}
+.ps-step.done .ps-dot{border-color:var(--good);background:var(--good);color:#fff}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(252,63,29,.3)}50%{box-shadow:0 0 0 6px rgba(252,63,29,0)}}
+
+.ps-qr-area{display:flex;align-items:center;justify-content:center;min-height:120px;background:#f8f8f8;border-radius:12px;margin:10px 0}
+.ps-qr-area canvas{display:block}
+.ps-phone-input{width:100%;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px;text-align:center;margin:8px 0}
+.ps-anim{min-height:60px;display:flex;align-items:center;justify-content:center}
+.bonus-counter{font-size:36px;font-weight:800;color:var(--brand);font-variant-numeric:tabular-nums}
+.bonus-label{font-size:12px;color:var(--muted);margin-top:4px}
+
+.reg-status{font-size:13px;font-weight:600;margin-top:8px;min-height:20px}
+.reg-progress{width:100%;height:4px;background:#eee;border-radius:4px;margin-top:12px;overflow:hidden}
+.reg-progress-bar{height:100%;background:linear-gradient(90deg,var(--brand),#ff7a1a);border-radius:4px;transition:width .4s ease;width:0%}
+.reg-done-icon{font-size:56px;margin-bottom:12px}
+.reg-done-text{font-size:16px;font-weight:700;margin-bottom:4px}
+.reg-done-sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+
+/* ===== Stats bar ===== */
+.stats-bar{display:flex;gap:12px;margin-bottom:20px}
+.stat-card{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;text-align:center;box-shadow:var(--shadow)}
+.stat-num{font-size:28px;font-weight:800;color:var(--brand)}
+.stat-label{font-size:12px;color:var(--muted);margin-top:2px}
+</style>
+</head>
+<body>
+
+<!-- ===== LOGIN GATE ===== -->
+<div class="login-gate" id="loginGate">
+  <div class="login-card">
+    <div class="logo">Demo Panel</div>
+    <div class="sub">Введите данные для входа</div>
+    <div class="field">
+      <input type="text" id="loginInput" placeholder="Логин" autocomplete="username">
+    </div>
+    <div class="field">
+      <input type="password" id="passInput" placeholder="Пароль" autocomplete="current-password">
+    </div>
+    <div class="field">
+      <input type="text" id="keyInput" placeholder="Ключ доступа" autocomplete="off">
+    </div>
+    <div class="err" id="keyErr"></div>
+    <button class="btn btn-brand" id="btnLogin">Войти</button>
+  </div>
+</div>
+
+<!-- ===== DASHBOARD ===== -->
+<div class="dash" id="dash">
+  <div class="dash-head">
+    <h1>Демо-панель</h1>
+    <button class="logout" id="btnLogout">Выйти</button>
+  </div>
+  <div class="dash-body">
+
+    <div class="stats-bar" id="statsBar">
+      <div class="stat-card"><div class="stat-num" id="statTotal">0</div><div class="stat-label">Аккаунтов</div></div>
+      <div class="stat-card"><div class="stat-num" id="statBonus">0</div><div class="stat-label">Бонусов накоплено</div></div>
+      <div class="stat-card"><div class="stat-num" id="statToday">0</div><div class="stat-label">Сегодня</div></div>
+    </div>
+
+    <div class="dash-grid">
+      <!-- Left: QR + Reg -->
+      <div class="card qr-area">
+        <h2>Добавить аккаунт</h2>
+        <p class="muted">Нажмите кнопку для генерации QR-кода Яндекс для входа в аккаунт</p>
+        <div id="qrSection">
+          <button class="btn btn-brand" id="btnAdd" style="margin-top:16px">Добавить аккаунт</button>
+          <div class="qr-box hidden" id="qrBox"><canvas id="qrCanvas" width="240" height="240"></canvas></div>
+          <div class="qr-link-box hidden" id="qrLinkBox">
+            <div class="qr-link-text" id="qrLinkText"></div>
+          </div>
+          <div class="qr-status hidden" id="qrStatus"><div class="spin"></div><span id="qrStatusText"></span></div>
+          <div class="qr-hint hidden" id="qrHint"></div>
+          <div class="qr-actions hidden" id="qrActions" style="display:flex;gap:8px;justify-content:center;margin-top:10px">
+            <button class="btn btn-ghost btn-sm" id="btnQrCopy">📋 Копировать ссылку</button>
+            <button class="btn btn-ghost btn-sm" id="btnQrOpen">🔗 Открыть ссылку</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Accounts list -->
+      <div class="card">
+        <h2>Аккаунты</h2>
+        <div class="acc-list" id="accList">
+          <div class="acc-empty" id="accEmpty">Аккаунтов пока нет</div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" id="btnRefresh">Обновить</button>
+          <button class="btn btn-ghost btn-sm" id="btnClear" style="color:var(--brand)">Очистить все</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== REGISTRATION OVERLAY ===== -->
+<div class="overlay" id="overlay">
+  <div class="reg-card" id="regCard">
+    <h2 id="regTitle">Регистрация аккаунта</h2>
+    <div class="reg-sub" id="regSub">Подождите, идёт процесс…</div>
+    <div class="phone" id="phoneWrap">
+      <div class="phone-screen" id="phoneScreen"></div>
+    </div>
+    <div class="reg-status" id="regStatus"></div>
+    <div class="reg-progress"><div class="reg-progress-bar" id="regBar"></div></div>
+  </div>
+</div>
+
+<script src="/static/js/qrcode.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let TOKEN = null;
+let accounts = [];
+let qrId = null, pollTimer = null, qrLink = '';
+
+/* ========== LOGIN ========== */
+$('keyInput').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+$('btnLogin').addEventListener('click', doLogin);
+
+async function doLogin() {
+  const login = $('loginInput').value.trim();
+  const password = $('passInput').value.trim();
+  const key = $('keyInput').value.trim();
+  if (!login || !password || !key) { $('keyErr').textContent = 'Заполните все поля'; return; }
+  $('btnLogin').disabled = true;
+  $('keyErr').textContent = '';
+  try {
+    const r = await fetch('/api/demo/check', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({login, password, key})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      $('loginGate').style.display = 'none';
+      $('dash').classList.add('active');
+      loadAccounts();
+    } else {
+      $('keyErr').textContent = d.error || 'Неверные данные';
+      $('keyInput').classList.add('error');
+      setTimeout(() => $('keyInput').classList.remove('error'), 500);
+    }
+  } catch(e) {
+    $('keyErr').textContent = 'Ошибка сети';
+  } finally {
+    $('btnLogin').disabled = false;
+  }
+}
+
+$('btnLogout').addEventListener('click', () => {
+  $('dash').classList.remove('active');
+  $('loginGate').style.display = 'flex';
+  $('loginInput').value = '';
+  $('passInput').value = '';
+  $('keyInput').value = '';
+});
+
+/* ========== ACCOUNTS LIST ========== */
+async function loadAccounts() {
+  try {
+    const r = await fetch('/api/demo/accounts');
+    const d = await r.json();
+    accounts = d.accounts || [];
+  } catch(e) { accounts = []; }
+  renderAccounts();
+}
+
+function renderAccounts() {
+  const box = $('accList');
+  if (!accounts.length) {
+    box.innerHTML = '<div class="acc-empty">Аккаунтов пока нет</div>';
+    updateStats();
+    return;
+  }
+  box.innerHTML = accounts.map((a, i) => {
+    const initials = (a.profile_name || a.name || '?').slice(0,1).toUpperCase();
+    const phone = a.phone ? a.phone.replace(/(\d{3})(\d{3})(\d{2})(\d{2})/, '+7 $1 $2-$3-$4') : '—';
+    const bonus = a.bonus_earned || 700;
+    return `<div class="acc-item">
+      <div class="acc-avatar">${esc(initials)}</div>
+      <div class="acc-info">
+        <div class="acc-name">${esc(a.profile_name || a.name)}</div>
+        <div class="acc-meta">${esc(phone)} &middot; ${esc(a.added || '')}</div>
+      </div>
+      <div class="acc-bonus">+${bonus}</div>
+      <button class="acc-del" data-name="${esc(a.name)}" title="Удалить">&times;</button>
+    </div>`;
+  }).join('');
+  box.querySelectorAll('.acc-del').forEach(b => {
+    b.addEventListener('click', async () => {
+      await fetch(`/api/demo/accounts/${encodeURIComponent(b.dataset.name)}`, {method:'DELETE'});
+      loadAccounts();
+    });
+  });
+  updateStats();
+}
+
+function updateStats() {
+  const total = accounts.length;
+  const bonus = accounts.reduce((s,a) => s + (a.bonus_earned || 700), 0);
+  const today = accounts.filter(a => {
+    const d = a.added || '';
+    return d.startsWith(new Date().toISOString().slice(0,10));
+  }).length;
+  $('statTotal').textContent = total;
+  $('statBonus').textContent = bonus;
+  $('statToday').textContent = today;
+}
+
+$('btnRefresh').addEventListener('click', loadAccounts);
+$('btnClear').addEventListener('click', async () => {
+  if (!confirm('Очистить все аккаунты?')) return;
+  await fetch('/api/demo/accounts/clear', {method:'POST'});
+  loadAccounts();
+});
+
+/* ========== QR FLOW ========== */
+$('btnAdd').addEventListener('click', startQR);
+$('btnQrCopy').addEventListener('click', () => { if(qrLink && navigator.clipboard) navigator.clipboard.writeText(qrLink); });
+$('btnQrOpen').addEventListener('click', () => { if(qrLink) window.open(qrLink, '_blank'); });
+
+function renderQr(text) {
+  const canvas = $('qrCanvas');
+  const qr = qrcode(0, 'M');
+  qr.addData(text, 'Byte');
+  qr.make();
+  const n = qr.getModuleCount();
+  const px = Math.max(4, Math.floor((220 - 20) / n));
+  const size = n * px + 20;
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = '#111';
+  for (let y = 0; y < n; y++)
+    for (let x = 0; x < n; x++)
+      if (qr.isDark(y, x)) ctx.fillRect(10 + x*px, 10 + y*px, px, px);
+}
+
+function setQRStatus(text, busy) {
+  const el = $('qrStatus');
+  el.classList.remove('hidden');
+  el.innerHTML = busy
+    ? `<div class="spin"></div><span>${text}</span>`
+    : `<span>${text}</span>`;
+}
+
+function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+async function startQR() {
+  $('btnAdd').disabled = true;
+  $('btnAdd').textContent = 'Генерация…';
+  $('qrHint').classList.add('hidden');
+  $('qrLinkBox').classList.add('hidden');
+  $('qrActions').style.display = 'none';
+  qrLink = '';
+  try {
+    const r = await fetch('/api/eda/qr/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({account:'demo-'+Date.now()})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.status);
+    qrId = d.qr_id;
+    qrLink = d.link || '';
+    renderQr(qrLink);
+    $('qrBox').classList.remove('hidden');
+    if (qrLink) {
+      $('qrLinkText').textContent = qrLink;
+      $('qrLinkBox').classList.remove('hidden');
+      $('qrActions').style.display = 'flex';
+    }
+    $('qrHint').textContent = 'Отсканируйте QR в приложении Яндекса или откройте ссылку';
+    $('qrHint').classList.remove('hidden');
+    setQRStatus('Ожидание сканирования…', true);
+    stopPoll();
+    pollTimer = setInterval(pollQR, 1500);
+    pollQR();
+  } catch(e) {
+    setQRStatus('Ошибка: ' + e.message, false);
+  } finally {
+    $('btnAdd').disabled = false;
+    $('btnAdd').textContent = 'Добавить аккаунт';
+  }
+}
+
+async function pollQR() {
+  if (!qrId) return;
+  try {
+    const r = await fetch(`/api/eda/qr/status/${qrId}`);
+    const d = await r.json();
+    if (d.state === 'waiting') {
+      setQRStatus(d.hint ? 'Ожидание: ' + d.hint : 'Ожидание сканирования…', true);
+      return;
+    }
+    stopPoll();
+    if (d.state === 'ok') {
+      setQRStatus('QR подтверждён! Запуск регистрации…', true);
+      $('qrHint').classList.add('hidden');
+      $('qrLinkBox').classList.add('hidden');
+      $('qrActions').style.display = 'none';
+      await startSimulation(d.session_id || '', d.yandexuid || '');
+    } else if (d.state === 'expired') {
+      setQRStatus('QR устарел. Нажмите «Добавить аккаунт» снова.', false);
+    } else {
+      setQRStatus('Ошибка: ' + (d.message || d.state), false);
+    }
+  } catch(e) { stopPoll(); setQRStatus('Ошибка сети', false); }
+}
+
+/* ========== REGISTRATION SIMULATION ========== */
+const REG_STEPS = [
+  {id:'device',    label:'Подключение устройства',     dur:2800, phone:null},
+  {id:'qr_scan',   label:'Сканирование QR-кода',       dur:2200, phone:'qr'},
+  {id:'phone',     label:'Ввод номера телефона',        dur:3500, phone:'phone'},
+  {id:'link',      label:'Привязка аккаунта',           dur:3000, phone:'linking'},
+  {id:'plus',      label:'Подключение Яндекс Плюс',     dur:2500, phone:'plus'},
+  {id:'edadeal',   label:'Активация Едадила',           dur:2800, phone:'edadeal'},
+  {id:'bonus',     label:'Накопление бонусов',           dur:5500, phone:'bonus'},
+];
+
+const PHONE_STATES = {
+  qr: {html:'<div class="ps-yandex">Яндекс</div><div class="ps-qr-area" id="psQrArea"><div class="spin"></div></div>'},
+  phone: {html:'<div class="ps-yandex">Яндекс</div><div style="text-align:center;padding:20px 0"><div style="font-size:13px;color:#999;margin-bottom:10px">Введите номер телефона</div><div class="ps-phone-input" style="border:1.5px solid #ddd;border-radius:10px;padding:10px;font-size:13px;text-align:center;background:#fafafa">+7 9XX XXX-XX-XX</div></div>'},
+  linking: {html:'<div class="ps-yandex">Яндекс</div><div style="text-align:center;padding:30px 0"><div class="spin" style="margin:0 auto 12px;width:28px;height:28px;border-width:3px"></div><div style="font-size:13px;color:#666">Привязка аккаунта…</div></div>'},
+  plus: {html:'<div class="ps-yandex">Яндекс</div><div style="text-align:center;padding:20px 0"><div style="font-size:40px;margin-bottom:8px">⭐</div><div style="font-size:14px;font-weight:700;margin-bottom:4px">Яндекс Плюс</div><div style="font-size:12px;color:#999">Активация подписки…</div></div>'},
+  edadeal: {html:'<div class="ps-yandex">Яндекс</div><div style="text-align:center;padding:20px 0"><div style="font-size:40px;margin-bottom:8px">🏷️</div><div style="font-size:14px;font-weight:700;margin-bottom:4px">Едадил</div><div style="font-size:12px;color:#999">Подключение кешбэка…</div></div>'},
+  bonus: {html:'<div class="ps-yandex">Яндекс</div><div style="text-align:center;padding:20px 0"><div style="font-size:40px;margin-bottom:8px">💰</div><div class="bonus-counter" id="psBonus">0</div><div class="bonus-label">бонусов начислено</div></div>'},
+  done: {html:''},
+};
+
+async function startSimulation(sessionId, yandexuid) {
+  const overlay = $('overlay');
+  overlay.classList.add('active');
+  const phone = $('phoneScreen');
+  const bar = $('regBar');
+  const status = $('regStatus');
+  const title = $('regTitle');
+  const sub = $('regSub');
+
+  title.textContent = 'Регистрация аккаунта';
+  sub.textContent = 'Выполняются автоматические шаги…';
+
+  const names = ['Алексей','Мария','Дмитрий','Анна','Сергей','Елена','Александр','Ольга','Никита','Татьяна'];
+  const surnames = ['Иванов','Петрова','Сидоров','Козлова','Новиков','Морозова','Волков','Соколова','Лебедев','Попова'];
+  const profileName = names[Math.floor(Math.random()*names.length)] + ' ' + surnames[Math.floor(Math.random()*surnames.length)];
+  const phoneNumber = '+7' + Array.from({length:10}, () => Math.floor(Math.random()*10)).join('');
+
+  let doneCount = 0;
+  const totalSteps = REG_STEPS.length;
+
+  for (const step of REG_STEPS) {
+    const progress = Math.round(((doneCount) / totalSteps) * 100);
+    bar.style.width = progress + '%';
+    status.textContent = step.label + '…';
+
+    // Set phone screen
+    if (step.phone && PHONE_STATES[step.phone]) {
+      phone.innerHTML = PHONE_STATES[step.phone].html;
+      if (step.phone === 'qr') {
+        setTimeout(() => {
+          const area = document.getElementById('psQrArea');
+          if (area) {
+            try {
+              const miniCanvas = document.createElement('canvas');
+              miniCanvas.width = 80; miniCanvas.height = 80;
+              const qr2 = qrcode(0, 'M');
+              qr2.addData('yandex-auth-demo-' + Date.now(), 'Byte');
+              qr2.make();
+              const n2 = qr2.getModuleCount();
+              const px2 = Math.max(2, Math.floor(60 / n2));
+              const ctx2 = miniCanvas.getContext('2d');
+              ctx2.fillStyle = '#fff'; ctx2.fillRect(0, 0, 80, 80);
+              ctx2.fillStyle = '#111';
+              for (let y2 = 0; y2 < n2; y2++)
+                for (let x2 = 0; x2 < n2; x2++)
+                  if (qr2.isDark(y2, x2)) ctx2.fillRect(10+x2*px2, 10+y2*px2, px2, px2);
+              area.innerHTML = '';
+              area.appendChild(miniCanvas);
+            } catch(e) { area.innerHTML = '<div style="font-size:12px;color:#999">QR сканирован</div>'; }
+          }
+        }, 600);
+      }
+      if (step.phone === 'bonus') {
+        animateBonusCounter();
+      }
+    }
+
+    // Small delay then mark step as visually processing
+    await sleep(300);
+
+    // Simulate processing delay
+    await sleep(step.dur);
+
+    doneCount++;
+    bar.style.width = Math.round((doneCount / totalSteps) * 100) + '%';
+
+    if (step.id === 'bonus') {
+      const counter = $('psBonus');
+      if (counter) counter.textContent = '700';
+    }
+  }
+
+  bar.style.width = '100%';
+  status.textContent = '';
+
+  // Show completion
+  phone.innerHTML = `<div style="text-align:center;padding:30px 0"><div style="font-size:48px;margin-bottom:10px">✅</div><div style="font-size:15px;font-weight:700;margin-bottom:4px">Аккаунт готов</div><div style="font-size:12px;color:#999">${esc(profileName)}</div><div style="font-size:11px;color:#aaa;margin-top:4px">+700 бонусов</div></div>`;
+  title.textContent = 'Готово!';
+  sub.textContent = 'Аккаунт успешно зарегистрирован и добавлен в базу';
+  bar.style.background = 'var(--good)';
+
+  // Save account
+  await fetch('/api/demo/accounts', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      name: 'demo-' + Date.now(),
+      session_id: sessionId,
+      yandexuid: yandexuid,
+      profile_name: profileName,
+      phone: phoneNumber,
+      plus_balance: 0,
+      plus_status: 'PLUS_ACTIVE',
+      bonus_earned: 700,
+    })
+  });
+
+  await sleep(3000);
+
+  // Close overlay
+  overlay.classList.remove('active');
+  bar.style.width = '0%';
+  bar.style.background = '';
+  stopPoll();
+  qrId = null;
+  $('qrBox').classList.add('hidden');
+  $('qrHint').classList.add('hidden');
+  $('qrLinkBox').classList.add('hidden');
+  $('qrActions').style.display = 'none';
+  $('qrStatus').classList.add('hidden');
+  loadAccounts();
+}
+
+function animateBonusCounter() {
+  const el = $('psBonus');
+  if (!el) return;
+  let current = 0;
+  const target = 700;
+  const duration = 4500;
+  const start = performance.now();
+  function tick(now) {
+    const elapsed = now - start;
+    const progress = Math.min(elapsed / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    current = Math.round(eased * target);
+    el.textContent = current;
+    if (progress < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+</script>
+</body>
+</html>
