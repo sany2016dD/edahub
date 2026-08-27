@@ -4405,25 +4405,6 @@ def api_courier_copy_cart():
     return jsonify({'ok': True, 'src_items': len(src_items), 'results': results})
 
 
-def _start_sales_bot():
-    """Запустить бот активации ключей в фоновом потоке (Railway).
-
-    Не блокирует webapp: если Telegram недоступен — поток перезапускается
-    в sales_bot.run_in_background. Отключить: SALES_BOT_ENABLED=0.
-    """
-    if os.environ.get('SALES_BOT_ENABLED', '1') == '0':
-        return
-    try:
-        import sales_bot
-        sales_bot.run_in_background()
-        print(' * Sales bot: запущен в фоне')
-    except Exception as e:
-        print(f' * Sales bot: не стартовал: {e}')
-
-
-_start_sales_bot()
-
-
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', '5001'))
     print(f' * Web UI: http://0.0.0.0:{port}')
