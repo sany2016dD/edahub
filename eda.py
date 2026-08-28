@@ -1832,10 +1832,10 @@ def check_promo(account):
     acc = get_eda_account(account) if isinstance(account, str) else account
     try:
         if _use_web(acc):
-            d = _web_call(acc, 'GET', '/api/v2/menu/goods', params={'auto_translate': 'false'})
+            d = _web_call(acc, 'POST', '/api/v2/menu/goods', json_body={}, params={'auto_translate': 'false'})
         else:
             lat, lon = _coords(acc, None, None)
-            d = _eda_call(acc, 'GET', '/api/v2/menu/goods', lat, lon, params={'auto_translate': 'false'})
+            d = _eda_call(acc, 'POST', '/api/v2/menu/goods', lat, lon, json_body={}, params={'auto_translate': 'false'})
     except Exception:
         return None
     if not isinstance(d, dict):
@@ -1866,10 +1866,10 @@ def promo_raw(account):
     """Сырой ответ communications из /api/v2/menu/goods (для диагностики)."""
     acc = get_eda_account(account) if isinstance(account, str) else account
     if _use_web(acc):
-        d = _web_call(acc, 'GET', '/api/v2/menu/goods', params={'auto_translate': 'false'})
+        d = _web_call(acc, 'POST', '/api/v2/menu/goods', json_body={}, params={'auto_translate': 'false'})
     else:
         lat, lon = _coords(acc, None, None)
-        d = _eda_call(acc, 'GET', '/api/v2/menu/goods', lat, lon, params={'auto_translate': 'false'})
+        d = _eda_call(acc, 'POST', '/api/v2/menu/goods', lat, lon, json_body={}, params={'auto_translate': 'false'})
     comms = d.get('communications') if isinstance(d, dict) else None
     return {'communications': comms, 'top_keys': list(d.keys()) if isinstance(d, dict) else None}
 
