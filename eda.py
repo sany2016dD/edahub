@@ -1823,6 +1823,12 @@ def _web_call(acc, method, path, json_body=None, params=None, timeout=25):
         return {'_status': r.status_code, '_text': r.text[:1000]}
 
 
+def _has_web_creds(acc):
+    """Есть ли у аккаунта web-куки/session_id для промо (независимо от taxi-token)."""
+    return bool(acc.get('session_id') or
+                (isinstance(acc.get('cookies'), dict) and acc.get('cookies')))
+
+
 def _promo_call(acc, slug, lat, lon):
     """GET /api/v2/catalog/<slug> — здесь лежат промо магазина (place.promos[]).
 
@@ -1832,7 +1838,7 @@ def _promo_call(acc, slug, lat, lon):
     """
     path = '/api/v2/catalog/' + (slug or '')
     params = {'latitude': lat, 'longitude': lon, 'shippingType': 'delivery'}
-    if not _use_web(acc):
+    if not _has_web_creds(acc):
         return _eda_call(acc, 'GET', path, lat, lon, params=params)
     hdrs = _web_hdrs(acc, lat, lon)
     retail = f'https://eda.yandex.ru/retail/{slug}?placeSlug={slug}'
@@ -1861,7 +1867,7 @@ def _nearby_shop_slugs(acc):
     """
     lat, lon = _coords(acc, None, None)
     try:
-        if _use_web(acc):
+        if _has_web_creds(acc):
             d = _web_call(acc, 'POST', '/eats/v1/layout-constructor/v1/layout',
                           json_body={'location': {'latitude': lat, 'longitude': lon}})
         else:

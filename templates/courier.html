@@ -525,8 +525,9 @@ function renderAccounts() {
       (isActive ? '<div class="acc-active-dot"></div>' : '') +
       '<div class="acc-info" data-idx="'+i+'"><div class="acc-name">'+esc(a.profile_name||a.name)+'</div>' +
        '<div class="acc-meta">'+esc(a.token?a.token.slice(0,16)+'…':'—')+' '+
-       (orderCounts[a.token]!=null?'<span class="acc-orders">📦 '+orderCounts[a.token]+'</span>':'')+'</div>' +
-       (a.promo?'<div class="acc-promo">'+esc(a.promo)+'</div>':'') + '</div>' +
+       (orderCounts[a.token]!=null?'<span class="acc-orders">📦 '+orderCounts[a.token]+'</span>':'')+
+       (a.promo?'<span class="acc-promo">'+esc(a.promo)+'</span>':'')+'</div>' +
+       '</div>' +
        '<button class="promo-acc" data-idx="'+i+'" title="Обновить промо">🔥</button>' +
        '<button class="del-acc" data-idx="'+i+'" title="Удалить">✕</button></div>';
   }).join('');
@@ -543,6 +544,7 @@ function renderAccounts() {
     try {
       const r = await fetch('/api/courier/account/'+encodeURIComponent(a.token)+'/promo', {method:'POST'});
       const d = await r.json();
+      accounts[+b.dataset.idx].promo = d.promo || '';
       renderAccounts();
       if (d.promo) toast('🔥 Промо: '+d.promo, 'success');
       else if (d.raw) showPromoDebug('Промо не найдено. Сырой communications:\n\n'+JSON.stringify(d.raw, null, 2));
