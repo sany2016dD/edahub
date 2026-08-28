@@ -1862,7 +1862,10 @@ def check_promo(account):
         return None
     if not isinstance(d, dict):
         return None
-    comms = d.get('communications') or {}
+    p = d.get('payload')
+    comms = d.get('communications')
+    if not isinstance(comms, dict) and isinstance(p, dict):
+        comms = p.get('communications')
     if not isinstance(comms, dict):
         comms = {}
     informers = comms.get('informers') or []
@@ -1896,7 +1899,13 @@ def promo_raw(account):
         lat, lon = _coords(acc, None, None)
         d = _eda_call(acc, 'POST', '/api/v2/menu/goods', lat, lon, json_body=body, params={'auto_translate': 'false'})
     comms = d.get('communications') if isinstance(d, dict) else None
-    return {'communications': comms, 'top_keys': list(d.keys()) if isinstance(d, dict) else None}
+    if not isinstance(comms, dict) and isinstance(d, dict):
+        p = d.get('payload')
+        if isinstance(p, dict):
+            comms = p.get('communications')
+    return {'communications': comms,
+            'payload': d.get('payload') if isinstance(d, dict) else None,
+            'top_keys': list(d.keys()) if isinstance(d, dict) else None}
 
 
 def web_saved_addresses(account, lat=None, lon=None):
