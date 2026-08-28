@@ -78,6 +78,7 @@ body{font-family:'Manrope',system-ui,sans-serif;background:var(--bg);color:var(-
 .acc-promo{color:#ff3b3b;font-size:11px;font-weight:600;margin-top:3px;line-height:1.25;white-space:normal}
 .acc-active-dot{width:8px;height:8px;border-radius:50%;background:var(--good);flex-shrink:0;animation:pulse 2s infinite}
 .del-acc{width:22px;height:22px;border:none;background:rgba(252,63,29,.08);color:var(--brand);border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
+.promo-acc{width:22px;height:22px;border:none;background:rgba(255,59,59,.1);color:#ff3b3b;border-radius:6px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
 .del-acc:hover{background:var(--brand);color:#fff;transform:scale(1.1)}
 .sidebar-foot{padding:10px 12px;border-top:1px solid var(--line)}
 .sidebar-foot .sel-count{font-size:11px;color:var(--muted);margin-bottom:6px}
@@ -520,7 +521,8 @@ function renderAccounts() {
        '<div class="acc-meta">'+esc(a.token?a.token.slice(0,16)+'…':'—')+' '+
        (orderCounts[a.token]!=null?'<span class="acc-orders">📦 '+orderCounts[a.token]+'</span>':'')+'</div>' +
        (a.promo?'<div class="acc-promo">🔥 '+esc(a.promo)+'</div>':'') + '</div>' +
-      '<button class="del-acc" data-idx="'+i+'" title="Удалить">✕</button></div>';
+       '<button class="promo-acc" data-idx="'+i+'" title="Обновить промо">🔥</button>' +
+       '<button class="del-acc" data-idx="'+i+'" title="Удалить">✕</button></div>';
   }).join('');
   box.querySelectorAll('.acc-info').forEach(el => el.addEventListener('click', () => selectAccount(accounts[+el.dataset.idx])));
   box.querySelectorAll('.acc-check').forEach(cb => cb.addEventListener('click', e => {
@@ -529,6 +531,18 @@ function renderAccounts() {
     renderAccounts(); if(TOKEN) loadAddress();
   }));
   box.querySelectorAll('.del-acc').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); deleteAccount(+b.dataset.idx); }));
+  box.querySelectorAll('.promo-acc').forEach(b => b.addEventListener('click', async e => {
+    e.stopPropagation();
+    const a = accounts[+b.dataset.idx]; if (!a) return;
+    try {
+      const r = await fetch('/api/courier/account/'+encodeURIComponent(a.token)+'/promo', {method:'POST'});
+      const d = await r.json();
+      renderAccounts();
+      if (d.promo) toast('🔥 Промо: '+d.promo, 'success');
+      else if (d.raw) alert('Промо не найдено. Сырой communications:\n\n'+JSON.stringify(d.raw, null, 2).slice(0, 2000));
+      else toast('Промо не найдено', 'warning');
+    } catch(e) { alert('err: '+e); }
+  }));
   updateBulkBar();
 }
 function selectAccount(a) { TOKEN=a.token; selectedTokens.add(a.token); renderAccounts(); loadAddress(); loadCart(); }

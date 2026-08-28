@@ -4195,6 +4195,30 @@ def api_courier_accounts_del(token):
     return jsonify({'ok': True})
 
 
+@app.route('/api/courier/account/<token>/promo', methods=['POST'])
+def api_courier_account_promo(token):
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
+    db, accounts = _cd_section(login, 'accounts')
+    acc = next((a for a in accounts if a.get('token') == token), None)
+    if not acc:
+        return jsonify({'ok': False, 'error': 'not found'}), 404
+    try:
+        promo = eda.check_promo(token)
+    except Exception as e:
+        promo = None
+    acc['promo'] = promo or ''
+    _save_courier_data(db)
+    raw = None
+    if not promo:
+        try:
+            raw = eda.promo_raw(token)
+        except Exception as e:
+            raw = {'error': str(e)}
+    return jsonify({'ok': True, 'promo': promo or '', 'raw': raw})
+
+
 @app.route('/api/courier/address', methods=['GET', 'POST', 'DELETE'])
 def api_courier_address():
     login = session.get('courier_user')
