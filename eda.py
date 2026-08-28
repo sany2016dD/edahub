@@ -1823,6 +1823,36 @@ def _web_call(acc, method, path, json_body=None, params=None, timeout=25):
         return {'_status': r.status_code, '_text': r.text[:1000]}
 
 
+def _promo_call(acc, slug, lat, lon):
+    """POST /api/v2/menu/goods с retail-реферером, как это делает сайт.
+
+    Браузер шлёт referer/x-retpath-y = /retail/<slug>?placeSlug=<slug>, без этого
+    сервер не включает магазинные communications (информеры-акции).
+    """
+    body = {'slug': slug, 'maxDepth': 0, 'latitude': lat, 'longitude': lon}
+    if not _use_web(acc):
+        return _eda_call(acc, 'POST', '/api/v2/menu/goods', lat, lon,
+                         json_body=body, params={'auto_translate': 'false'})
+    hdrs = _web_hdrs(acc, lat, lon)
+    retail = f'https://eda.yandex.ru/retail/{slug}?placeSlug={slug}'
+    hdrs['referer'] = retail
+    hdrs['x-retpath-y'] = retail
+    ck = _web_cookies(acc)
+    proxies = None
+    p = (acc.get('proxy') or '').strip()
+    if p:
+        proxies = {'http': p, 'https': p}
+    url = EDA_HOST + '/api/v2/menu/goods'
+    r = requests.post(url, headers=hdrs, cookies=ck, json=body,
+                      params={'auto_translate': 'false'}, timeout=25, proxies=proxies)
+    if r.status_code >= 400:
+        raise RuntimeError(f'Я.Еда: HTTP {r.status_code} на POST /api/v2/menu/goods: {r.text[:300]}')
+    try:
+        return r.json()
+    except Exception:
+        return {'_status': r.status_code, '_text': r.text[:1000]}
+
+
 def _promo_slug(acc):
     """slug магазина для запроса промо: из аккаунта, иначе из его корзин."""
     if not isinstance(acc, dict):
@@ -1873,11 +1903,7 @@ def check_promo(account):
     try:
         slug = _promo_slug(acc)
         lat, lon = _coords(acc, None, None)
-        body = {'slug': slug, 'maxDepth': 0, 'latitude': lat, 'longitude': lon}
-        if _use_web(acc):
-            d = _web_call(acc, 'POST', '/api/v2/menu/goods', json_body=body, params={'auto_translate': 'false'})
-        else:
-            d = _eda_call(acc, 'POST', '/api/v2/menu/goods', lat, lon, json_body=body, params={'auto_translate': 'false'})
+        d = _promo_call(acc, slug, lat, lon)
     except Exception:
         return None
     if not isinstance(d, dict):
@@ -1915,12 +1941,7 @@ def promo_raw(account):
     acc = get_eda_account(account) if isinstance(account, str) else account
     slug = _promo_slug(acc)
     lat, lon = _coords(acc, None, None)
-    body = {'slug': slug, 'maxDepth': 0, 'latitude': lat, 'longitude': lon}
-    if _use_web(acc):
-        d = _web_call(acc, 'POST', '/api/v2/menu/goods', json_body=body, params={'auto_translate': 'false'})
-    else:
-        lat, lon = _coords(acc, None, None)
-        d = _eda_call(acc, 'POST', '/api/v2/menu/goods', lat, lon, json_body=body, params={'auto_translate': 'false'})
+    d = _promo_call(acc, slug, lat, lon)
     p = d.get('payload') if isinstance(d, dict) else None
     pcomms = p.get('communications') if isinstance(p, dict) else None
     comms = d.get('communications') if isinstance(d, dict) else None
