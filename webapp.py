@@ -3934,6 +3934,88 @@ def api_admin_users_regen_key(login):
     return jsonify({'error': 'Не найден'}), 404
 
 
+# ---------- Ключи-подписки (одноразовые) ----------
+KEYS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'keys.json')
+
+
+def _load_keys():
+    try:
+        return json.load(open(KEYS_FILE, encoding='utf-8'))
+    except Exception:
+        return {'keys': []}
+
+
+def _save_keys(data):
+    json.dump(data, open(KEYS_FILE, 'w', encoding='utf-8'),
+              ensure_ascii=False, indent=2)
+
+
+def _gen_reg_key():
+    import secrets
+    while True:
+        code = 'EDA-' + secrets.token_hex(5).upper() + '-' + secrets.token_hex(3).upper()
+        db = _load_keys()
+        if not any(k['code'] == code for k in db['keys']):
+            return code
+
+
+def _now_ts():
+    return time.time()
+
+
+def _add_days(days):
+    return time.strftime('%Y-%m-%d %H:%M:%S',
+                         time.localtime(time.time() + int(days) * 86400))
+
+
+def _parse_dt(s):
+    try:
+        return time.mktime(time.strptime(s, '%Y-%m-%d %H:%M:%S'))
+    except Exception:
+        return 0
+
+
+@app.route('/api/admin/keys', methods=['GET'])
+def api_admin_keys_list():
+    return jsonify(_load_keys())
+
+
+@app.route('/api/admin/keys', methods=['POST'])
+def api_admin_keys_create():
+    data = request.get_json(silent=True) or {}
+    days = int(data.get('days') or 30)
+    if days < 1:
+        days = 1
+    count = min(int(data.get('count') or 1), 50)
+    if count < 1:
+        count = 1
+    db = _load_keys()
+    created = []
+    for _ in range(count):
+        code = _gen_reg_key()
+        k = {
+            'code': code,
+            'days': days,
+            'expires_at': _add_days(days),
+            'used': False,
+            'used_by': None,
+            'used_at': None,
+            'created_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+        }
+        db['keys'].append(k)
+        created.append(k)
+    _save_keys(db)
+    return jsonify({'ok': True, 'keys': created})
+
+
+@app.route('/api/admin/keys/<code>', methods=['DELETE'])
+def api_admin_keys_delete(code):
+    db = _load_keys()
+    db['keys'] = [k for k in db['keys'] if k['code'] != code]
+    _save_keys(db)
+    return jsonify({'ok': True})
+
+
 # ---------- Курьер / сборщик корзин ----------
 COURIER_DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'courier_data.json')
 
@@ -3972,17 +4054,66 @@ def api_courier_me():
 
 
 @app.route('/api/courier/check', methods=['POST'])
+def _sub_active(user):
+    """Подписка активна, если у пользователя нет expires_at или она ещё не истекла."""
+    exp = user.get('expires_at')
+    if not exp:
+        return True
+    return _parse_dt(exp) >= _now_ts()
+
+
 def api_courier_check():
+    data = request.get_json(silent=True) or {}
+    login = (data.get('login') or '').strip()
+    password = (data.get('password') or '').strip()
+    if not login or not password:
+        return jsonify({'ok': False, 'error': 'Введите логин и пароль'}), 400
+    db = _load_users()
+    user = next((u for u in db['users'] if u['login'] == login), None)
+    if not user or user['password_hash'] != _hash_pw(password):
+        return jsonify({'ok': False, 'error': 'Неверный логин или пароль'}), 403
+    if not _sub_active(user):
+        sub_until = user.get('expires_at', '')
+        return jsonify({'ok': False, 'error': 'Подписка истекла' + (f' ({sub_until})' if sub_until else '')}), 403
+    session['courier_user'] = login
+    return jsonify({'ok': True, 'login': login})
+
+
+@app.route('/api/courier/register', methods=['POST'])
+def api_courier_register():
     data = request.get_json(silent=True) or {}
     login = (data.get('login') or '').strip()
     password = (data.get('password') or '').strip()
     key = (data.get('key') or '').strip()
     if not login or not password or not key:
         return jsonify({'ok': False, 'error': 'Заполните все поля'}), 400
+    if len(password) < 4:
+        return jsonify({'ok': False, 'error': 'Пароль слишком короткий (мин. 4 символа)'}), 400
     db = _load_users()
-    user = next((u for u in db['users'] if u['login'] == login), None)
-    if not user or user['password_hash'] != _hash_pw(password) or user['key'] != key:
-        return jsonify({'ok': False, 'error': 'Неверные данные'}), 403
+    if any(u['login'] == login for u in db['users']):
+        return jsonify({'ok': False, 'error': 'Пользователь с таким логином уже существует'}), 400
+    kdb = _load_keys()
+    k = next((x for x in kdb['keys'] if x['code'] == key), None)
+    if not k:
+        return jsonify({'ok': False, 'error': 'Неверный ключ'}), 403
+    if k.get('used'):
+        return jsonify({'ok': False, 'error': 'Этот ключ уже использован'}), 403
+    if k.get('expires_at') and _parse_dt(k['expires_at']) < _now_ts():
+        return jsonify({'ok': False, 'error': 'Срок действия ключа истёк'}), 403
+    k['used'] = True
+    k['used_by'] = login
+    k['used_at'] = time.strftime('%Y-%m-%d %H:%M:%S')
+    _save_keys(kdb)
+    user = {
+        'login': login,
+        'password_hash': _hash_pw(password),
+        'key': k['code'],
+        'role': 'courier',
+        'expires_at': k.get('expires_at'),
+        'created': time.strftime('%Y-%m-%d %H:%M:%S'),
+    }
+    db['users'].append(user)
+    _save_users(db)
     session['courier_user'] = login
     return jsonify({'ok': True, 'login': login})
 

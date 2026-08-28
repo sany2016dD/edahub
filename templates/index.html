@@ -530,6 +530,33 @@
         <button class="btn btn-primary btn-sm" id="usrCreate">Создать</button>
       </div>
     </div>
+    <div class="card" style="padding:16px;margin-bottom:16px;background:var(--panel);border:1px solid var(--border);border-radius:14px">
+      <h4 style="margin:0 0 10px;font-size:14px">🔑 Ключи активации (подписка)</h4>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+        <label style="font-size:12px;color:var(--muted)">Срок (дней)
+          <input type="number" id="keyDays" class="db-search" value="30" min="1" style="margin-top:4px;width:110px">
+        </label>
+        <label style="font-size:12px;color:var(--muted)">Кол-во
+          <input type="number" id="keyCount" class="db-search" value="1" min="1" max="50" style="margin-top:4px;width:90px">
+        </label>
+        <button class="btn btn-primary btn-sm" id="keyCreate">Сгенерировать</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="keyTable">
+          <thead>
+            <tr>
+              <th>Код</th>
+              <th>Дней</th>
+              <th>Действует до</th>
+              <th>Статус</th>
+              <th>Использовал</th>
+              <th class="col-actions">Действия</th>
+            </tr>
+          </thead>
+          <tbody id="keyBody"></tbody>
+        </table>
+      </div>
+    </div>
     <div class="table-wrap">
       <table class="data-table" id="usrTable">
         <thead>
@@ -770,7 +797,60 @@
   });
   // Load users when the tab is clicked
   const usersTab = document.querySelector('[data-tab="users"]');
-  if (usersTab) usersTab.addEventListener('click', loadUsers);
+  if (usersTab) usersTab.addEventListener('click', () => { loadUsers(); loadKeys(); });
+
+  // ===== Ключи активации (подписка) =====
+  function loadKeys() {
+    const tbody = document.getElementById('keyBody');
+    if (!tbody) return;
+    return api('/api/admin/keys', {method:'GET'}).then(d => {
+      const keys = (d.keys || []).slice().reverse();
+      tbody.innerHTML = keys.map(k => {
+        const used = k.used;
+        const status = used
+          ? '<span style="color:var(--muted)">использован</span>'
+          : (k.expires_at && Date.now() > (new Date(k.expires_at.replace(' ','T')).getTime())
+            ? '<span style="color:var(--danger)">истёк</span>'
+            : '<span style="color:#2ecc71">активен</span>');
+        return `<tr>
+          <td><span style="font-family:monospace;font-size:12px" title="${esc(k.code)}">${esc(k.code)}</span></td>
+          <td>${esc(k.days)}</td>
+          <td style="font-size:12px;color:var(--muted)">${esc(k.expires_at||'—')}</td>
+          <td>${status}</td>
+          <td style="font-size:12px;color:var(--muted)">${esc(k.used_by||'—')}</td>
+          <td>
+            <button class="btn btn-ghost btn-sm key-copy" data-code="${esc(k.code)}" title="Скопировать">📋</button>
+            <button class="btn btn-ghost btn-sm key-del" data-code="${esc(k.code)}" title="Удалить" style="color:var(--danger)">✕</button>
+          </td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="6" style="color:var(--muted);text-align:center;padding:16px">Ключей пока нет</td></tr>';
+      tbody.querySelectorAll('.key-copy').forEach(b => b.addEventListener('click', () => {
+        navigator.clipboard.writeText(b.dataset.code);
+        b.textContent = '✅';
+        setTimeout(() => b.textContent = '📋', 1500);
+      }));
+      tbody.querySelectorAll('.key-del').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('Удалить ключ ' + b.dataset.code + '?')) return;
+        await api('/api/admin/keys/'+encodeURIComponent(b.dataset.code), {method:'DELETE'});
+        loadKeys();
+      }));
+    }).catch(() => {});
+  }
+
+  document.getElementById('keyCreate').addEventListener('click', async () => {
+    const days = parseInt(document.getElementById('keyDays').value, 10) || 30;
+    const count = parseInt(document.getElementById('keyCount').value, 10) || 1;
+    const d = await api('/api/admin/keys', {method:'POST', body:JSON.stringify({days, count})});
+    if (d.ok) {
+      const codes = (d.keys || []).map(k => k.code).join('\n');
+      if (count > 1) {
+        alert('Сгенерировано ' + d.keys.length + ' ключей на ' + days + ' дней:\n\n' + codes);
+      } else {
+        alert('Ключ на ' + days + ' дней:\n\n' + codes);
+      }
+      loadKeys();
+    } else { alert(d.error || 'Ошибка'); }
+  });
 })();
 </script>
 </body>

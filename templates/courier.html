@@ -248,11 +248,17 @@ body{font-family:'Manrope',system-ui,sans-serif;background:var(--bg);color:var(-
   <div class="login-card">
     <div class="logo">Сборщик <span>корзин</span></div>
     <div class="sub">Автоматическая сборка корзин Яндекс Еды</div>
+    <div style="display:flex;background:var(--s2);border:1px solid var(--line);border-radius:10px;padding:4px;margin-bottom:14px">
+      <button type="button" class="login-tab" id="tabLogin" style="flex:1;border:none;background:var(--brand);color:#fff;border-radius:7px;padding:7px;font-weight:700;cursor:pointer">Войти</button>
+      <button type="button" class="login-tab" id="tabReg" style="flex:1;border:none;background:transparent;color:var(--muted);border-radius:7px;padding:7px;font-weight:700;cursor:pointer">Регистрация</button>
+    </div>
     <div class="err" id="keyErr"></div>
     <input class="inp" id="loginInput" type="text" placeholder="Логин" style="margin-bottom:10px" autocomplete="username">
     <input class="inp" id="passInput" type="password" placeholder="Пароль" style="margin-bottom:10px" autocomplete="current-password">
-    <input class="inp" id="keyInput" type="text" placeholder="Ключ доступа" style="margin-bottom:12px" autocomplete="off">
+    <div class="reg-hint" id="regHint" style="display:none;font-size:12px;color:var(--muted);margin-bottom:6px">Введите ключ активации (подписка)</div>
+    <input class="inp" id="keyInput" type="text" placeholder="Ключ активации" style="margin-bottom:12px;display:none" autocomplete="off">
     <button class="btn btn-brand" id="btnLogin" style="width:100%">Войти</button>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px;min-height:14px" id="loginModeLabel"></div>
   </div>
 </div>
 
@@ -423,16 +429,42 @@ function getSelectedAccounts() { return selectedTokens.size ? accounts.filter(a 
 })();
 
 /* ===== AUTH ===== */
+/* Режим: 'login' | 'register'. */
+let authMode = 'login';
+function setAuthMode(mode) {
+  authMode = mode;
+  const isReg = mode === 'register';
+  $('tabLogin').style.background = isReg ? 'transparent' : 'var(--brand)';
+  $('tabLogin').style.color = isReg ? 'var(--muted)' : '#fff';
+  $('tabReg').style.background = isReg ? 'var(--brand)' : 'transparent';
+  $('tabReg').style.color = isReg ? '#fff' : 'var(--muted)';
+  $('keyInput').style.display = isReg ? '' : 'none';
+  $('regHint').style.display = isReg ? '' : 'none';
+  $('btnLogin').textContent = isReg ? 'Зарегистрироваться' : 'Войти';
+  $('loginModeLabel').textContent = isReg ? 'Регистрация: логин, пароль и одноразовый ключ активации' : 'Вход по логину и паролю';
+  $('keyErr').textContent = '';
+}
+$('tabLogin').addEventListener('click', () => setAuthMode('login'));
+$('tabReg').addEventListener('click', () => setAuthMode('register'));
+setAuthMode('login');
+
 $('loginInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('passInput').focus(); });
-$('passInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('keyInput').focus(); });
+$('passInput').addEventListener('keydown', e => { if (e.key === 'Enter') (authMode === 'register' ? $('keyInput') : $('btnLogin')).focus(); });
 $('keyInput').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 $('btnLogin').addEventListener('click', doLogin);
 async function doLogin() {
-  const login = $('loginInput').value.trim(), password = $('passInput').value.trim(), key = $('keyInput').value.trim();
-  if (!login || !password || !key) { $('keyErr').textContent = 'Заполните все поля'; return; }
+  const login = $('loginInput').value.trim(), password = $('passInput').value.trim();
+  const key = $('keyInput').value.trim();
+  if (authMode === 'register') {
+    if (!login || !password || !key) { $('keyErr').textContent = 'Заполните все поля'; return; }
+  } else {
+    if (!login || !password) { $('keyErr').textContent = 'Введите логин и пароль'; return; }
+  }
   $('btnLogin').disabled = true; $('keyErr').textContent = '';
+  const url = authMode === 'register' ? '/api/courier/register' : '/api/courier/check';
   try {
-    const r = await fetch('/api/courier/check', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({login, password, key})});
+    const body = authMode === 'register' ? {login, password, key} : {login, password};
+    const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const d = await r.json();
     if (d.ok) { $('loginGate').style.display='none'; $('dash').classList.add('active'); $('loginLabel').textContent = login; await loadSavedData(); }
     else { $('keyErr').textContent = d.error || 'Неверные данные'; }
@@ -738,6 +770,62 @@ $('btnFavItemSave').addEventListener('click',async()=>{
   $('favItemOverlay').classList.remove('active');$('favItemUid').value='';$('favItemName').value='';$('favItemPrice').value='';
   renderFavItems();
 });
+
+/* ===== FAVORITE CARTS ===== */
+function renderFavorites(){
+  const box=$('favContent');if(!box)return;
+  fetch('/api/courier/favorites').then(r=>r.json()).then(d=>{
+    const favs=d.favorites||[];
+    if(!favs.length){box.innerHTML='<p class="empty">Пусто. Сохраните корзину в избранное со вкладки «Корзина» ⭐</p>';return;}
+    let html='';
+    favs.forEach((f,i)=>{
+      const items=f.items||[];
+      const total=fmtRub(f.total||items.reduce((s,it)=>s+(it.price||0)*(it.quantity||1),0));
+      html+='<div class="card fav-card" data-i="'+i+'">'+
+        '<div style="display:flex;align-items:center;gap:8px;justify-content:space-between">'+
+          '<div style="flex:1;min-width:0">'+
+            '<div style="font-weight:700;font-size:14px;cursor:pointer" class="fav-rename-name" data-i="'+i+'" title="Переименовать">'+esc(f.name||'Корзина')+'</div>'+
+            '<div style="font-size:12px;color:var(--muted)">'+esc(f.store_name||'')+' · '+items.length+' поз.</div>'+
+          '</div>'+
+          '<div style="font-weight:800;color:var(--brand)">'+total+'</div>'+
+        '</div>'+
+        '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">'+
+          '<button type="button" class="btn btn-brand btn-sm fav-apply" data-i="'+i+'" '+(TOKEN?'':'disabled')+'>📦 В корзину</button>'+
+          '<button type="button" class="btn btn-ghost btn-sm fav-rename" data-i="'+i+'">✏️</button>'+
+          '<button type="button" class="btn btn-ghost btn-sm fav-del" data-i="'+i+'">🗑</button>'+
+        '</div>'+
+      '</div>';
+    });
+    box.innerHTML=html;
+    box.querySelectorAll('.fav-apply').forEach(b=>b.addEventListener('click',async()=>{
+      const f=favs[+b.dataset.i];if(!TOKEN){toast('Выберите аккаунт','warning');return;}
+      const slug=f.slug||'';if(!slug){toast('Нет привязки к магазину','warning');return;}
+      const items=f.items||[];let ok=0,total=items.length;
+      for(const it of items){
+        const itemId=it.item_uid||it.item_id;if(!itemId){total--;continue;}
+        try{
+          const rr=await fetch('/api/eda/'+TOKEN+'/cart',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({place_slug:slug,item_id:itemId,qty:it.quantity||1,business:'restaurant'})});
+          const dd=await rr.json();if(dd.ok!==false)ok++;
+        }catch(e){}
+      }
+      toast('✅ Добавлено '+ok+'/'+total,'success');loadCart();
+    }));
+    box.querySelectorAll('.fav-del').forEach(b=>b.addEventListener('click',async()=>{
+      const i=+b.dataset.i,f=favs[i];
+      const ok2=await confirmDialog('Удалить из избранного?','«'+(f.name||'Корзина')+'»',{icon:'🗑',danger:true});
+      if(!ok2)return;
+      await fetch('/api/courier/favorites',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i})});
+      toast('Удалено','success');renderFavorites();
+    }));
+    box.querySelectorAll('.fav-rename-name,.fav-rename').forEach(b=>b.addEventListener('click',async()=>{
+      const i=+b.dataset.i,f=favs[i];
+      const nn=prompt('Новое название:',f.name||'');if(!nn||!nn.trim())return;
+      await fetch('/api/courier/favorites/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i,name:nn.trim()})});
+      renderFavorites();
+    }));
+  }).catch(()=>{box.innerHTML='<p class="empty">Ошибка загрузки</p>'});
+}
 
 /* ===== ADD BY URL ===== */
 $('btnAddUrl').addEventListener('click',addByUrl);
