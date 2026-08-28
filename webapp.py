@@ -4042,8 +4042,8 @@ def _cd_section(login, key):
 
 @app.route('/courier')
 def page_courier():
-    login = session.get('courier_user') or 'courier'
-    return render_template('courier.html', login=login)
+    login = session.get('courier_user')
+    return render_template('courier.html', login=login or '')
 
 
 @app.route('/api/courier/me')
@@ -4127,7 +4127,9 @@ def api_courier_logout():
 
 @app.route('/api/courier/accounts', methods=['GET'])
 def api_courier_accounts_list():
-    login = session.get('courier_user') or 'courier'
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
     db = _load_courier_data()
     accounts = (db.get('accounts') or {}).get(login, [])
     return jsonify({'ok': True, 'accounts': accounts})
@@ -4135,7 +4137,9 @@ def api_courier_accounts_list():
 
 @app.route('/api/courier/orders-count')
 def api_courier_orders_count():
-    login = session.get('courier_user') or 'courier'
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
     db = _load_courier_data()
     accounts = (db.get('accounts') or {}).get(login, [])
     counts = {}
@@ -4158,7 +4162,9 @@ def api_courier_orders_count():
 
 @app.route('/api/courier/accounts', methods=['POST'])
 def api_courier_accounts_add():
-    login = session.get('courier_user') or 'courier'
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
     data = request.get_json(silent=True) or {}
     token = data.get('token', '')
     name = data.get('name', '')
@@ -4193,7 +4199,9 @@ def api_courier_accounts_del(token):
 
 @app.route('/api/courier/account/<token>/promo', methods=['POST'])
 def api_courier_account_promo(token):
-    login = session.get('courier_user') or 'courier'
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
     db, accounts = _cd_section(login, 'accounts')
     acc = next((a for a in accounts if a.get('token') == token), None)
     if not acc:
@@ -4217,7 +4225,9 @@ def api_courier_account_promo(token):
 
 @app.route('/api/courier/address', methods=['GET', 'POST', 'DELETE'])
 def api_courier_address():
-    login = session.get('courier_user') or 'courier'
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
     db, addrs = _cd_section(login, 'addresses')
     if request.method == 'GET':
         return jsonify({'ok': True, 'address': addrs[-1] if addrs else None, 'addresses': addrs})
@@ -4252,7 +4262,9 @@ def api_courier_address_active():
 
 @app.route('/api/courier/cart', methods=['GET', 'POST', 'DELETE'])
 def api_courier_cart():
-    login = session.get('courier_user') or 'courier'
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
     db, carts = _cd_section(login, 'carts')
     if request.method == 'GET':
         return jsonify({'ok': True, 'cart': carts[-1] if carts else None, 'carts': carts})
@@ -4283,7 +4295,9 @@ def api_courier_cart():
 
 @app.route('/api/courier/cart/<int:idx>', methods=['DELETE'])
 def api_courier_cart_delete_idx(idx=0):
-    login = session.get('courier_user') or 'courier'
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
     db, carts = _cd_section(login, 'carts')
     if 0 <= idx < len(carts):
         carts.pop(idx)
@@ -4293,7 +4307,9 @@ def api_courier_cart_delete_idx(idx=0):
 
 @app.route('/api/courier/cart/item-qty', methods=['POST'])
 def api_courier_cart_item_qty():
-    login = session.get('courier_user') or 'courier'
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
     data = request.get_json(silent=True) or {}
     token = data.get('token')
     slug = data.get('slug')
@@ -4321,7 +4337,9 @@ def api_courier_cart_item_qty():
 
 @app.route('/api/courier/cart/clear-eda', methods=['POST'])
 def api_courier_cart_clear_eda():
-    login = session.get('courier_user') or 'courier'
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
     data = request.get_json(silent=True) or {}
     token = data.get('token')
     slug = data.get('slug')
@@ -4395,7 +4413,9 @@ def api_eda_cart_detail(token):
 
 @app.route('/api/courier/favorites', methods=['GET', 'POST', 'DELETE'])
 def api_courier_favorites():
-    login = session.get('courier_user') or 'courier'
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
     db, favs = _cd_section(login, 'favorites')
     if request.method == 'GET':
         return jsonify({'ok': True, 'favorites': favs})
@@ -4422,7 +4442,9 @@ def api_courier_favorites():
 
 @app.route('/api/courier/favorites/rename', methods=['POST'])
 def api_courier_favorites_rename():
-    login = session.get('courier_user') or 'courier'
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
     db, favs = _cd_section(login, 'favorites')
     data = request.get_json(silent=True) or {}
     idx = data.get('index')
@@ -4438,7 +4460,9 @@ def api_courier_favorites_rename():
 
 @app.route('/api/courier/fav-items', methods=['GET', 'POST', 'DELETE'])
 def api_courier_fav_items():
-    login = session.get('courier_user') or 'courier'
+    login = session.get('courier_user')
+    if not login:
+        return jsonify({'ok': False, 'error': 'auth'}), 401
     db, items = _cd_section(login, 'fav_items')
     if request.method == 'GET':
         return jsonify({'ok': True, 'items': items})
