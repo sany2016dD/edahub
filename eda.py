@@ -1883,9 +1883,12 @@ def check_promo(account):
     if not isinstance(d, dict):
         return None
     p = d.get('payload')
+    pcomms = p.get('communications') if isinstance(p, dict) else None
     comms = d.get('communications')
-    if not isinstance(comms, dict) and isinstance(p, dict):
-        comms = p.get('communications')
+    if isinstance(pcomms, dict) and (pcomms.get('informers') or []):
+        comms = pcomms
+    elif not isinstance(comms, dict):
+        comms = pcomms or {}
     if not isinstance(comms, dict):
         comms = {}
     informers = comms.get('informers') or []
@@ -1918,14 +1921,14 @@ def promo_raw(account):
     else:
         lat, lon = _coords(acc, None, None)
         d = _eda_call(acc, 'POST', '/api/v2/menu/goods', lat, lon, json_body=body, params={'auto_translate': 'false'})
+    p = d.get('payload') if isinstance(d, dict) else None
+    pcomms = p.get('communications') if isinstance(p, dict) else None
     comms = d.get('communications') if isinstance(d, dict) else None
-    if not isinstance(comms, dict) and isinstance(d, dict):
-        p = d.get('payload')
-        if isinstance(p, dict):
-            comms = p.get('communications')
-    return {'communications': comms,
-            'payload': d.get('payload') if isinstance(d, dict) else None,
-            'top_keys': list(d.keys()) if isinstance(d, dict) else None}
+    if isinstance(pcomms, dict) and (pcomms.get('informers') or []):
+        comms = pcomms
+    elif not isinstance(comms, dict):
+        comms = pcomms
+    return {'communications': comms, 'payload': p, 'top_keys': list(d.keys()) if isinstance(d, dict) else None}
 
 
 def web_saved_addresses(account, lat=None, lon=None):
