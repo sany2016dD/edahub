@@ -904,10 +904,11 @@ async function loadCart(){
         const items=((c0.items)||(c0.cart&&c0.cart.items)||[]);
         if(!items.length){alert('Пусто в детальной корзине');return;}
         const it=items[0];
-        const res=await fetch('/api/eda/'+TOKEN+'/cart/add',{method:'POST',headers:{'Content-Type':'application/json'},
+        const res=await fetch('/api/eda/'+TOKEN+'/cart',{method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({place_slug:slug,item_id:it.item_uid,qty:1,business:'shop'})});
-        const j=await res.json();
-        alert('ADD RESULT (item_uid='+it.item_uid+'):\n\n'+JSON.stringify(j,null,2).slice(0,1500));
+        const txt=await res.text();
+        let j; try{j=JSON.parse(txt);}catch(e){j=null;}
+        alert('ADD STATUS '+res.status+' (item_uid='+it.item_uid+'):\n\n'+JSON.stringify(j||txt,null,2).slice(0,1500));
       }catch(e){alert('err: '+e);}
     });
     $('btnSaveCart').addEventListener('click',saveActiveCarts);
