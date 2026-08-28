@@ -764,7 +764,7 @@ $('btnFavItemSave').addEventListener('click',async()=>{
   const uid=$('favItemUid').value.trim();if(!uid){toast('Введите UID','warning');return;}
   const name=$('favItemName').value.trim()||uid, price=parseFloat($('favItemPrice').value)||0;
   const r=await fetch('/api/courier/fav-items',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({item_uid:uid,name:name,price:price,slug:currentSlug||'',business:'restaurant'})});
+    body:JSON.stringify({item_uid:uid,name:name,price:price,slug:currentSlug||'',business:'shop'})});
   const d=await r.json();
   if(d.duplicate) toast('Такой товар уже есть','warning'); else toast('⭐ '+name,'success');
   $('favItemOverlay').classList.remove('active');$('favItemUid').value='';$('favItemName').value='';$('favItemPrice').value='';
@@ -800,7 +800,7 @@ function renderFavorites(){
     box.querySelectorAll('.fav-apply').forEach(b=>b.addEventListener('click',async()=>{
       const f=favs[+b.dataset.i];if(!TOKEN){toast('Выберите аккаунт','warning');return;}
       const slug=f.slug||'';if(!slug){toast('Нет привязки к магазину','warning');return;}
-      const biz=f.business||'restaurant';
+      const biz=f.business||'shop';
       const items=f.items||[];let ok=0,fail=0,total=items.length;
       for(const it of items){
         const itemId=it.item_uid||it.item_id;if(!itemId){total--;continue;}
@@ -923,7 +923,7 @@ async function loadCart(){
     box.querySelectorAll('.fav-add').forEach(b=>b.addEventListener('click',async(e)=>{
       e.preventDefault();const ci=+b.dataset.ci,ac=_allCarts[ci];if(!ac)return;
       const slug=ac.place_slug;
-      const biz=ac.place_business||'restaurant';
+      const biz=ac.place_business||'shop';
       const fullItems=(ac.items||[]).map(it=>{const mi=it.place_menu_item||{};const uid=it.id||mi.id||it.item_uid||mi.uid||it.item_id;return{item_uid:uid,item_id:uid,mi_id:mi.id,mi_uid:mi.uid,name:mi.name||it.name,price:it.price||0,quantity:it.quantity||1};});
       await fetch('/api/courier/favorites',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({name:ac.place_name,slug:slug,items:fullItems,total:fullItems.reduce((s,it)=>s+it.price*it.quantity,0),store_name:ac.place_name,source_token:TOKEN,business:biz})});
@@ -975,7 +975,7 @@ async function loadCartItems(ci,ac){
       const itemId=it.id||mi.id||it.item_uid||it.item_id||mi.uid||'';
       const itemUid=String(it.id||mi.id||it.item_uid||mi.uid||it.item_id||'');
       const isFav=favItems.some(f=>f.item_uid&&itemUid&&f.item_uid===itemUid);
-      const biz=ac.place_business||'restaurant';
+      const biz=ac.place_business||'shop';
 
       // From detailed info
       const det=detailMap[itemUid]||{};
@@ -1023,7 +1023,7 @@ async function loadCartItems(ci,ac){
     if(!uid){toast('Нет UID','warning');return;}
     if(favItems.some(f=>f.item_uid===uid)){toast('⚠️ Уже в быстрых товарах','warning');return;}
     await fetch('/api/courier/fav-items',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({item_uid:uid,name:name,price:price,slug:slug,business:'restaurant'})});
+      body:JSON.stringify({item_uid:uid,name:name,price:price,slug:slug,business:'shop'})});
     toast('⭐ → быстрые товары','success');
     btn.classList.add('active'); btn.style.animation='pulse .3s';
     setTimeout(()=>btn.style.animation='',300);
@@ -1034,7 +1034,7 @@ async function loadCartItems(ci,ac){
     e.preventDefault();e.stopPropagation();
     const curQty=parseInt(btn.dataset.qty)||1;
     const newQty=btn.classList.contains('qty-plus')?curQty+1:curQty-1;
-    const itemId=btn.dataset.id,slug=btn.dataset.slug,biz=btn.dataset.biz||'restaurant';
+    const itemId=btn.dataset.id,slug=btn.dataset.slug,biz=btn.dataset.biz||'shop';
     if(!TOKEN||!itemId||newQty<0)return;
     btn.disabled=true; btn.style.transform='scale(.8)';
     try{

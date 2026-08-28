@@ -1648,6 +1648,19 @@ def add_to_cart(account, slug, item_id, qty=1, item_options=None, lat=None, lon=
     """
     acc = get_eda_account(account) if isinstance(account, str) else account
     lat, lon = _coords(acc, lat, lon)
+    # Для магазинов (retail/shop) item_uid из корзины — это uuid, а Яндекс при добавлении
+    # ждёт внутренний id меню. Резолвим через поиск магазина.
+    if business in ('shop', 'retail') and re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-', str(item_id), re.I):
+        try:
+            sr = shop_search(acc, slug, text=str(item_id)[:8])
+            sr_items = sr if isinstance(sr, list) else sr.get('products', sr.get('items', []))
+            for it in (sr_items or []):
+                uid = it.get('uid', '') or it.get('id', '')
+                if str(uid) == str(item_id):
+                    item_id = it.get('id', it.get('menu_item_id', item_id))
+                    break
+        except Exception:
+            pass
     body = {
         'item_id': str(item_id),
         'quantity': int(qty) if qty is not None else 1,
