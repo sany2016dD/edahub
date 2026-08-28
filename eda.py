@@ -547,23 +547,37 @@ def qr_status(qr_id):
         if not session_id:
             return {'state': 'error', 'message': f'нет Session_id в cookies: {ck}'}
         account_name = st.get('account_name', '')
-        if account_name:
-            try:
-                accounts = load_eda_accounts()
+        # Сохраняем ВЕСЬ web-cookie jar (Session_id, sessionid2, i, sessar, …),
+        # чтобы персональные фичи (промо магазинов и т.п.) работали и для
+        # taxi-аккаунтов. Обновляем по имени, либо по session_id, либо создаём.
+        try:
+            accounts = load_eda_accounts()
+            target = None
+            if account_name:
                 for a in accounts:
                     if a.get('name') == account_name:
-                        a['session_id'] = session_id
-                        if ck.get('yandexuid'):
-                            a['yandexuid'] = ck['yandexuid']
-                        a['cookies'] = ck
-                        save_eda_accounts(accounts)
+                        target = a
                         break
-            except Exception:
-                pass
+            if target is None:
+                for a in accounts:
+                    if a.get('session_id') == session_id:
+                        target = a
+                        break
+            if target is None:
+                add_eda_account(account_name or '', cookies_raw=json.dumps(ck, ensure_ascii=False),
+                                session_id=session_id, yandexuid=ck.get('yandexuid', ''))
+            else:
+                target['session_id'] = session_id
+                if ck.get('yandexuid'):
+                    target['yandexuid'] = ck['yandexuid']
+                target['cookies'] = ck
+                save_eda_accounts(accounts)
+        except Exception:
+            pass
         with QR_LOCK:
             QR_STATE.pop(qr_id, None)
         return {'state': 'ok', 'session_id': session_id, 'yandexuid': ck.get('yandexuid', ''),
-                'account_name': account_name}
+                'cookies': ck, 'account_name': account_name}
     if state == 'auth_challenge':
         return {'state': 'waiting', 'hint': 'нужно доп. подтверждение в Яндекс-приложении'}
     return {'state': 'waiting', 'hint': f'state={state}'}
