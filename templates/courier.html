@@ -947,8 +947,8 @@ async function loadCartItems(ci,ac){
       const price=it.price||mi.price||0;
       const promo=mi.promo_price||0;
       const qty=it.quantity||1;
-      const itemId=it.item_id||mi.uid||it.item_uid||'';
-      const itemUid=String(mi.uid||it.item_uid||it.item_id||'');
+      const itemId=it.item_uid||it.item_id||mi.uid||'';
+      const itemUid=String(it.item_uid||mi.uid||it.item_id||'');
       const isFav=favItems.some(f=>f.item_uid&&itemUid&&f.item_uid===itemUid);
       const biz=ac.place_business||'restaurant';
 
@@ -1043,7 +1043,7 @@ async function saveActiveCarts(){
     const d=await r.json();const allCarts=d.carts||[];let saved=0;
     for(const ac of allCarts){
       try{
-        const items=(ac.items||[]).map(it=>{const mi=it.place_menu_item||{};return{item_id:mi.uid||it.item_uid||it.item_id,name:mi.name||it.name,price:it.price||mi.price||0,quantity:it.quantity||1};});
+        const items=(ac.items||[]).map(it=>{const mi=it.place_menu_item||{};const uid=it.item_uid||mi.uid||it.item_id;return{item_uid:uid,item_id:uid,name:mi.name||it.name,price:it.price||mi.price||0,quantity:it.quantity||1};});
         const total=ac.total||items.reduce((s,it)=>s+it.price*it.quantity,0);
         await fetch('/api/courier/cart',{method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({slug:ac.place_slug,items:items,total:total,store_name:ac.place_name||ac.place_slug})});saved++;
