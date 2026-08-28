@@ -4053,7 +4053,6 @@ def api_courier_me():
     return jsonify({'ok': True, 'login': login})
 
 
-@app.route('/api/courier/check', methods=['POST'])
 def _sub_active(user):
     """Подписка активна, если у пользователя нет expires_at или она ещё не истекла."""
     exp = user.get('expires_at')
@@ -4062,6 +4061,7 @@ def _sub_active(user):
     return _parse_dt(exp) >= _now_ts()
 
 
+@app.route('/api/courier/check', methods=['POST'])
 def api_courier_check():
     data = request.get_json(silent=True) or {}
     login = (data.get('login') or '').strip()
