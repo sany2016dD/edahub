@@ -1854,24 +1854,70 @@ def _promo_call(acc, slug, lat, lon):
         return {'_status': r.status_code, '_text': r.text[:1000]}
 
 
+def _nearby_shop_slugs(acc):
+    """Ближайшие магазины (retail/shop) через layout-constructor.
+
+    Возвращает список slug в порядке близости (из mini_places_carousels).
+    """
+    lat, lon = _coords(acc, None, None)
+    try:
+        if _use_web(acc):
+            d = _web_call(acc, 'POST', '/eats/v1/layout-constructor/v1/layout',
+                          json_body={'location': {'latitude': lat, 'longitude': lon}})
+        else:
+            d = _eda_call(acc, 'POST', '/eats/v1/layout-constructor/v1/layout', lat, lon,
+                          json_body={'location': {'latitude': lat, 'longitude': lon}})
+    except Exception:
+        return []
+    if not isinstance(d, dict):
+        return []
+    slugs = []
+    try:
+        carousels = (((d.get('data') or {}).get('mini_places_carousels')) or [])
+        for c in carousels:
+            places = ((c.get('payload') or {}).get('places') or [])
+            for p in places:
+                sl = p.get('slug') if isinstance(p, dict) else None
+                if sl and sl not in slugs:
+                    slugs.append(sl)
+    except Exception:
+        pass
+    if not slugs:
+        import re as _re
+        txt = json.dumps(d, ensure_ascii=False)
+        for m in _re.finditer(r'"slug"\s*:\s*"([a-z0-9_]+)"', txt):
+            sl = m.group(1)
+            if any(k in sl for k in ('magnit', 'pater', 'pyater', 'perek',
+                                     'fix', 'retail', 'shop')) and sl not in slugs:
+                slugs.append(sl)
+    return slugs
+
+
 def _promo_slug(acc):
-    """slug магазина для запроса промо: из аккаунта, иначе из его корзин."""
+    """Список slug магазинов для проверки промо.
+
+    Приоритет: явный slug аккаунта → slug из корзин → ближайшие магазины
+    (layout-constructor) → fallback.
+    """
     if not isinstance(acc, dict):
-        return 'magnit_celevaya_ngmjk'
-    slug = (acc.get('slug') or acc.get('place_slug') or acc.get('store_slug')
-            or acc.get('retail_slug') or '').strip()
-    if slug:
-        return slug
+        return ['magnit_celevaya_ngmjk']
+    explicit = (acc.get('slug') or acc.get('place_slug') or acc.get('store_slug')
+                or acc.get('retail_slug') or '').strip()
+    if explicit:
+        return [explicit]
     try:
         carts = all_carts(acc)
         if isinstance(carts, dict):
             for c in (carts.get('carts') or []):
                 s = c.get('slug') or c.get('place_slug')
                 if s:
-                    return s
+                    return [s]
     except Exception:
         pass
-    return 'magnit_celevaya_ngmjk'
+    nearby = _nearby_shop_slugs(acc)
+    if nearby:
+        return nearby
+    return ['magnit_celevaya_ngmjk']
 
 
 def _promo_first(d):
@@ -1906,53 +1952,75 @@ def _promos_from(d):
 
 
 def check_promo(account):
-    """Проверить акции магазина через /api/v2/catalog/<slug>.
+    """Проверить акции магазина(ов) через /api/v2/catalog/<slug>.
 
-    Возвращает текст промо (напр. «Скидка 500 ₽ — по карте Альфа-Банка…»)
-    из place.promos[].description/name, или None.
+    Перебирает ближайшие магазины (layout-constructor), возвращает текст
+    первой найденной акции (напр. «Скидка 500 ₽ — по карте Альфа-Банка…»)
+    из place.promos[].description/name. Если не найдено — None.
     """
     acc = get_eda_account(account) if isinstance(account, str) else account
     try:
-        slug = _promo_slug(acc)
+        slugs = _promo_slug(acc)
         lat, lon = _coords(acc, None, None)
-        d = _promo_call(acc, slug, lat, lon)
     except Exception:
         return None
-    if not isinstance(d, dict):
-        return None
-    promos = _promos_from(d)
-    if not promos:
-        return None
-    for promo in promos:
-        if not isinstance(promo, dict):
+    if isinstance(slugs, str):
+        slugs = [slugs]
+    for slug in slugs[:10]:
+        try:
+            d = _promo_call(acc, slug, lat, lon)
+        except Exception:
             continue
-        text = str((promo.get('description') or promo.get('name') or '')).strip()
-        if text and any(k in text.lower() for k in
-                        ('скидк', '₽', ' руб', 'бонус', 'промокод', 'альф', 'акци', 'доставк')):
-            return text
-    for promo in promos:
-        if isinstance(promo, dict):
+        if not isinstance(d, dict):
+            continue
+        promos = _promos_from(d)
+        if not promos:
+            continue
+        for promo in promos:
+            if not isinstance(promo, dict):
+                continue
             text = str((promo.get('description') or promo.get('name') or '')).strip()
-            if text:
+            if text and any(k in text.lower() for k in
+                            ('скидк', '₽', ' руб', 'бонус', 'промокод', 'альф',
+                             'акци', 'доставк')):
                 return text
+        for promo in promos:
+            if isinstance(promo, dict):
+                text = str((promo.get('description') or promo.get('name') or '')).strip()
+                if text:
+                    return text
     return None
 
 
 def promo_raw(account):
-    """Сырой ответ catalog-эндпоинта (для диагностики)."""
+    """Сырой ответ catalog-эндпоинтов для списка ближайших магазинов (диагностика)."""
     acc = get_eda_account(account) if isinstance(account, str) else account
-    slug = _promo_slug(acc)
+    slugs = _promo_slug(acc)
+    if isinstance(slugs, str):
+        slugs = [slugs]
     lat, lon = _coords(acc, None, None)
-    d = _promo_call(acc, slug, lat, lon)
-    place = None
-    promos = None
-    if isinstance(d, dict):
+    results = []
+    for slug in slugs[:8]:
         try:
-            place = d['payload']['foundPlace']['place']
-        except Exception:
-            place = None
-        if isinstance(place, dict):
-            promos = place.get('promos')
+            d = _promo_call(acc, slug, lat, lon)
+        except Exception as e:
+            results.append({'slug': slug, 'error': str(e)[:200]})
+            continue
+        place = None
+        promos = None
+        if isinstance(d, dict):
+            try:
+                place = d['payload']['foundPlace']['place']
+            except Exception:
+                place = None
+            if isinstance(place, dict):
+                promos = place.get('promos')
+        results.append({
+            'slug': slug,
+            'place_slug': place.get('slug') if isinstance(place, dict) else None,
+            'address': (place.get('address', {}) or {}).get('short') if isinstance(place, dict) else None,
+            'promos': promos,
+        })
     acc_info = {}
     if isinstance(acc, dict):
         for k in ('name', 'lat', 'lon', 'slug', 'place_slug', 'store_slug',
@@ -1961,25 +2029,7 @@ def promo_raw(account):
                 acc_info[k] = acc.get(k)
         if 'cookies' in acc and isinstance(acc.get('cookies'), dict):
             acc_info['cookie_names'] = list(acc.get('cookies').keys())
-    carts_info = []
-    try:
-        carts = all_carts(acc)
-        if isinstance(carts, dict):
-            raw_carts = carts.get('carts') or []
-            for c in raw_carts:
-                if not isinstance(c, dict):
-                    continue
-                row = {k: c.get(k) for k in ('slug', 'place_slug', 'business', 'type', 'id', 'placeId') if k in c}
-                row['keys'] = list(c.keys())
-                carts_info.append(row)
-        else:
-            carts_info = {'type': type(carts).__name__}
-    except Exception as e:
-        carts_info = {'error': str(e)[:300]}
-    return {'slug': slug, 'lat': lat, 'lon': lon,
-            'acc': acc_info, 'carts': carts_info,
-            'place': place, 'promos': promos,
-            'top_keys': list(d.keys()) if isinstance(d, dict) else None}
+    return {'slugs': slugs, 'lat': lat, 'lon': lon, 'acc': acc_info, 'results': results}
 
 
 def web_saved_addresses(account, lat=None, lon=None):
