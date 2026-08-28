@@ -1953,7 +1953,32 @@ def promo_raw(account):
             place = None
         if isinstance(place, dict):
             promos = place.get('promos')
-    return {'slug': slug, 'place': place, 'promos': promos,
+    acc_info = {}
+    if isinstance(acc, dict):
+        for k in ('name', 'lat', 'lon', 'slug', 'place_slug', 'store_slug',
+                  'retail_slug', 'business', 'city', 'address', 'regionSlug'):
+            if k in acc:
+                acc_info[k] = acc.get(k)
+        if 'cookies' in acc and isinstance(acc.get('cookies'), dict):
+            acc_info['cookie_names'] = list(acc.get('cookies').keys())
+    carts_info = []
+    try:
+        carts = all_carts(acc)
+        if isinstance(carts, dict):
+            raw_carts = carts.get('carts') or []
+            for c in raw_carts:
+                if not isinstance(c, dict):
+                    continue
+                row = {k: c.get(k) for k in ('slug', 'place_slug', 'business', 'type', 'id', 'placeId') if k in c}
+                row['keys'] = list(c.keys())
+                carts_info.append(row)
+        else:
+            carts_info = {'type': type(carts).__name__}
+    except Exception as e:
+        carts_info = {'error': str(e)[:300]}
+    return {'slug': slug, 'lat': lat, 'lon': lon,
+            'acc': acc_info, 'carts': carts_info,
+            'place': place, 'promos': promos,
             'top_keys': list(d.keys()) if isinstance(d, dict) else None}
 
 
