@@ -1826,8 +1826,9 @@ def _web_call(acc, method, path, json_body=None, params=None, timeout=25):
 def _promo_slug(acc):
     """slug магазина для запроса промо: из аккаунта, иначе из его корзин."""
     if not isinstance(acc, dict):
-        return ''
-    slug = (acc.get('slug') or acc.get('place_slug') or '').strip()
+        return 'magnit_celevaya_ngmjk'
+    slug = (acc.get('slug') or acc.get('place_slug') or acc.get('store_slug')
+            or acc.get('retail_slug') or '').strip()
     if slug:
         return slug
     try:
@@ -1839,7 +1840,7 @@ def _promo_slug(acc):
                     return s
     except Exception:
         pass
-    return slug
+    return 'magnit_celevaya_ngmjk'
 
 
 def check_promo(account):

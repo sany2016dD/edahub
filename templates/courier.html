@@ -76,6 +76,7 @@ body{font-family:'Manrope',system-ui,sans-serif;background:var(--bg);color:var(-
 .acc-meta{font-size:10px;color:var(--muted)}
 .acc-orders{display:inline-block;background:var(--brand-s);color:var(--brand);padding:0 4px;border-radius:6px;font-size:10px;margin-left:4px;font-weight:600}
 .acc-promo{display:inline-block;background:rgba(34,197,94,.15);color:#16a34a;border:1px solid rgba(34,197,94,.32);padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;margin-top:3px;line-height:1.25;white-space:normal;max-width:100%}
+.promo-debug{margin-top:8px;padding:10px;background:#1b1b1f;color:#ffb4b4;border:1px solid #3a2a2a;border-radius:8px;font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto}
 .acc-active-dot{width:8px;height:8px;border-radius:50%;background:var(--good);flex-shrink:0;animation:pulse 2s infinite}
 .del-acc{width:22px;height:22px;border:none;background:rgba(252,63,29,.08);color:var(--brand);border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
 .promo-acc{width:22px;height:22px;border:none;background:rgba(255,59,59,.1);color:#ff3b3b;border-radius:6px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
@@ -280,6 +281,7 @@ body{font-family:'Manrope',system-ui,sans-serif;background:var(--bg);color:var(-
       <div class="acc-list" id="accList"><div class="empty">Добавьте аккаунт</div></div>
       <div class="sidebar-foot" id="sidebarFoot">
         <div id="bulkActions"></div>
+<div class="promo-debug" id="promoDebug" style="display:none"></div>
         <div style="display:flex;gap:6px;margin-bottom:8px">
           <button class="btn btn-ghost btn-sm" id="btnSelectAllAcc" style="flex:1">☑ Выбрать все</button>
           <button class="btn btn-brand btn-sm" id="btnAddAcc" style="flex:1">+ Добавить</button>
@@ -509,6 +511,10 @@ async function loadOrderCounts() {
 }
 
 /* ===== ACCOUNTS ===== */
+function showPromoDebug(text){
+  const el = document.getElementById('promoDebug'); if(!el) return;
+  el.textContent = text; el.style.display = 'block';
+}
 function renderAccounts() {
   const box = $('accList');
   if (!accounts.length) { box.innerHTML = '<div class="empty">Добавьте аккаунт</div>'; updateBulkBar(); return; }
@@ -539,9 +545,9 @@ function renderAccounts() {
       const d = await r.json();
       renderAccounts();
       if (d.promo) toast('🔥 Промо: '+d.promo, 'success');
-      else if (d.raw) alert('Промо не найдено. Сырой communications:\n\n'+JSON.stringify(d.raw, null, 2).slice(0, 2000));
+      else if (d.raw) showPromoDebug('Промо не найдено. Сырой communications:\n\n'+JSON.stringify(d.raw, null, 2));
       else toast('Промо не найдено', 'warning');
-    } catch(e) { alert('err: '+e); }
+    } catch(e) { showPromoDebug('err: '+e); }
   }));
   updateBulkBar();
 }
