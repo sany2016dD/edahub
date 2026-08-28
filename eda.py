@@ -1955,8 +1955,8 @@ def check_promo(account):
     """Проверить акции магазина(ов) через /api/v2/catalog/<slug>.
 
     Перебирает ближайшие магазины (layout-constructor), возвращает текст
-    первой найденной акции (напр. «Скидка 500 ₽ — по карте Альфа-Банка…»)
-    из place.promos[].description/name. Если не найдено — None.
+    первой релевантной акции (приоритет: «Альфа» или акция с суммой
+    «Скидка … ₽»), иначе первую найденную. Если не найдено — None.
     """
     acc = get_eda_account(account) if isinstance(account, str) else account
     try:
@@ -1966,6 +1966,8 @@ def check_promo(account):
         return None
     if isinstance(slugs, str):
         slugs = [slugs]
+    priority = []
+    any_promo = []
     for slug in slugs[:10]:
         try:
             d = _promo_call(acc, slug, lat, lon)
@@ -1980,15 +1982,16 @@ def check_promo(account):
             if not isinstance(promo, dict):
                 continue
             text = str((promo.get('description') or promo.get('name') or '')).strip()
-            if text and any(k in text.lower() for k in
-                            ('скидк', '₽', ' руб', 'бонус', 'промокод', 'альф',
-                             'акци', 'доставк')):
-                return text
-        for promo in promos:
-            if isinstance(promo, dict):
-                text = str((promo.get('description') or promo.get('name') or '')).strip()
-                if text:
-                    return text
+            if not text:
+                continue
+            low = text.lower()
+            any_promo.append(text)
+            if ('альф' in low) or (('₽' in low or ' руб' in low) and 'скидк' in low):
+                priority.append(text)
+    if priority:
+        return priority[0]
+    if any_promo:
+        return any_promo[0]
     return None
 
 
