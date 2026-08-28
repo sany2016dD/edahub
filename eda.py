@@ -1824,15 +1824,16 @@ def _web_call(acc, method, path, json_body=None, params=None, timeout=25):
 
 
 def _promo_call(acc, slug, lat, lon):
-    """POST /api/v2/menu/goods с retail-реферером, как это делает сайт.
+    """GET /api/v2/catalog/<slug> — здесь лежат промо магазина (place.promos[]).
 
-    Браузер шлёт referer/x-retpath-y = /retail/<slug>?placeSlug=<slug>, без этого
-    сервер не включает магазинные communications (информеры-акции).
+    Перехват показал: акция (напр. «Скидка 500 ₽ — по карте Альфа-Банка»)
+    отдаётся именно в ответе catalog-эндпоинта в payload.foundPlace.place.promos[].description,
+    а не в /api/v2/menu/goods. Реферер — retail-страница.
     """
-    body = {'slug': slug, 'maxDepth': 0, 'latitude': lat, 'longitude': lon}
+    path = '/api/v2/catalog/' + (slug or '')
+    params = {'latitude': lat, 'longitude': lon, 'shippingType': 'delivery'}
     if not _use_web(acc):
-        return _eda_call(acc, 'POST', '/api/v2/menu/goods', lat, lon,
-                         json_body=body, params={'auto_translate': 'false'})
+        return _eda_call(acc, 'GET', path, lat, lon, params=params)
     hdrs = _web_hdrs(acc, lat, lon)
     retail = f'https://eda.yandex.ru/retail/{slug}?placeSlug={slug}'
     hdrs['referer'] = retail
@@ -1842,11 +1843,11 @@ def _promo_call(acc, slug, lat, lon):
     p = (acc.get('proxy') or '').strip()
     if p:
         proxies = {'http': p, 'https': p}
-    url = EDA_HOST + '/api/v2/menu/goods'
-    r = requests.post(url, headers=hdrs, cookies=ck, json=body,
-                      params={'auto_translate': 'false'}, timeout=25, proxies=proxies)
+    url = EDA_HOST + path
+    r = requests.get(url, headers=hdrs, cookies=ck, params=params,
+                     timeout=25, proxies=proxies)
     if r.status_code >= 400:
-        raise RuntimeError(f'Я.Еда: HTTP {r.status_code} на POST /api/v2/menu/goods: {r.text[:300]}')
+        raise RuntimeError(f'Я.Еда: HTTP {r.status_code} на GET /api/v2/catalog: {r.text[:300]}')
     try:
         return r.json()
     except Exception:
@@ -1893,11 +1894,22 @@ def _promo_first(d):
     return found[0] if found else None
 
 
-def check_promo(account):
-    """Проверить промокод/информеры аккаунта через /api/v2/menu/goods.
+def _promos_from(d):
+    """Извлечь спискок промо магазина из ответа catalog: payload.foundPlace.place.promos[]."""
+    try:
+        place = d['payload']['foundPlace']['place']
+    except Exception:
+        return None
+    if not isinstance(place, dict):
+        return None
+    return place.get('promos') or []
 
-    Возвращает текст промокода (из communications.informers[].payload.text.value)
-    или None, если промокодов нет / запрос не удался.
+
+def check_promo(account):
+    """Проверить акции магазина через /api/v2/catalog/<slug>.
+
+    Возвращает текст промо (напр. «Скидка 500 ₽ — по карте Альфа-Банка…»)
+    из place.promos[].description/name, или None.
     """
     acc = get_eda_account(account) if isinstance(account, str) else account
     try:
@@ -1908,48 +1920,41 @@ def check_promo(account):
         return None
     if not isinstance(d, dict):
         return None
-    p = d.get('payload')
-    pcomms = p.get('communications') if isinstance(p, dict) else None
-    comms = d.get('communications')
-    if isinstance(pcomms, dict) and (pcomms.get('informers') or []):
-        comms = pcomms
-    elif not isinstance(comms, dict):
-        comms = pcomms or {}
-    if not isinstance(comms, dict):
-        comms = {}
-    informers = comms.get('informers') or []
-    for inf in informers:
-        if not isinstance(inf, dict):
+    promos = _promos_from(d)
+    if not promos:
+        return None
+    for promo in promos:
+        if not isinstance(promo, dict):
             continue
-        payload = inf.get('payload') or {}
-        text = None
-        if isinstance(payload, dict):
-            tv = payload.get('text')
-            if isinstance(tv, dict):
-                text = tv.get('value')
-            elif isinstance(tv, str):
-                text = tv
-        if not text and isinstance(inf.get('text'), str):
-            text = inf.get('text')
-        if text:
-            return str(text)
-    return _promo_first(d)
+        text = str((promo.get('description') or promo.get('name') or '')).strip()
+        if text and any(k in text.lower() for k in
+                        ('скидк', '₽', ' руб', 'бонус', 'промокод', 'альф', 'акци', 'доставк')):
+            return text
+    for promo in promos:
+        if isinstance(promo, dict):
+            text = str((promo.get('description') or promo.get('name') or '')).strip()
+            if text:
+                return text
+    return None
 
 
 def promo_raw(account):
-    """Сырой ответ communications из /api/v2/menu/goods (для диагностики)."""
+    """Сырой ответ catalog-эндпоинта (для диагностики)."""
     acc = get_eda_account(account) if isinstance(account, str) else account
     slug = _promo_slug(acc)
     lat, lon = _coords(acc, None, None)
     d = _promo_call(acc, slug, lat, lon)
-    p = d.get('payload') if isinstance(d, dict) else None
-    pcomms = p.get('communications') if isinstance(p, dict) else None
-    comms = d.get('communications') if isinstance(d, dict) else None
-    if isinstance(pcomms, dict) and (pcomms.get('informers') or []):
-        comms = pcomms
-    elif not isinstance(comms, dict):
-        comms = pcomms
-    return {'communications': comms, 'payload': p, 'top_keys': list(d.keys()) if isinstance(d, dict) else None}
+    place = None
+    promos = None
+    if isinstance(d, dict):
+        try:
+            place = d['payload']['foundPlace']['place']
+        except Exception:
+            place = None
+        if isinstance(place, dict):
+            promos = place.get('promos')
+    return {'slug': slug, 'place': place, 'promos': promos,
+            'top_keys': list(d.keys()) if isinstance(d, dict) else None}
 
 
 def web_saved_addresses(account, lat=None, lon=None):
