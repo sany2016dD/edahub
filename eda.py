@@ -1823,6 +1823,25 @@ def _web_call(acc, method, path, json_body=None, params=None, timeout=25):
         return {'_status': r.status_code, '_text': r.text[:1000]}
 
 
+def _promo_slug(acc):
+    """slug магазина для запроса промо: из аккаунта, иначе из его корзин."""
+    if not isinstance(acc, dict):
+        return ''
+    slug = (acc.get('slug') or acc.get('place_slug') or '').strip()
+    if slug:
+        return slug
+    try:
+        carts = all_carts(acc)
+        if isinstance(carts, dict):
+            for c in (carts.get('carts') or []):
+                s = c.get('slug') or c.get('place_slug')
+                if s:
+                    return s
+    except Exception:
+        pass
+    return slug
+
+
 def check_promo(account):
     """Проверить промокод/информеры аккаунта через /api/v2/menu/goods.
 
@@ -1831,11 +1850,13 @@ def check_promo(account):
     """
     acc = get_eda_account(account) if isinstance(account, str) else account
     try:
+        slug = _promo_slug(acc)
+        lat, lon = _coords(acc, None, None)
+        body = {'slug': slug, 'maxDepth': 0, 'latitude': lat, 'longitude': lon}
         if _use_web(acc):
-            d = _web_call(acc, 'POST', '/api/v2/menu/goods', json_body={}, params={'auto_translate': 'false'})
+            d = _web_call(acc, 'POST', '/api/v2/menu/goods', json_body=body, params={'auto_translate': 'false'})
         else:
-            lat, lon = _coords(acc, None, None)
-            d = _eda_call(acc, 'POST', '/api/v2/menu/goods', lat, lon, json_body={}, params={'auto_translate': 'false'})
+            d = _eda_call(acc, 'POST', '/api/v2/menu/goods', lat, lon, json_body=body, params={'auto_translate': 'false'})
     except Exception:
         return None
     if not isinstance(d, dict):
@@ -1865,11 +1886,14 @@ def check_promo(account):
 def promo_raw(account):
     """Сырой ответ communications из /api/v2/menu/goods (для диагностики)."""
     acc = get_eda_account(account) if isinstance(account, str) else account
+    slug = _promo_slug(acc)
+    lat, lon = _coords(acc, None, None)
+    body = {'slug': slug, 'maxDepth': 0, 'latitude': lat, 'longitude': lon}
     if _use_web(acc):
-        d = _web_call(acc, 'POST', '/api/v2/menu/goods', json_body={}, params={'auto_translate': 'false'})
+        d = _web_call(acc, 'POST', '/api/v2/menu/goods', json_body=body, params={'auto_translate': 'false'})
     else:
         lat, lon = _coords(acc, None, None)
-        d = _eda_call(acc, 'POST', '/api/v2/menu/goods', lat, lon, json_body={}, params={'auto_translate': 'false'})
+        d = _eda_call(acc, 'POST', '/api/v2/menu/goods', lat, lon, json_body=body, params={'auto_translate': 'false'})
     comms = d.get('communications') if isinstance(d, dict) else None
     return {'communications': comms, 'top_keys': list(d.keys()) if isinstance(d, dict) else None}
 
