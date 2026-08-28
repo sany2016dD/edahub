@@ -315,7 +315,7 @@ body{font-family:'Manrope',system-ui,sans-serif;background:var(--bg);color:var(-
           </div>
         </div>
         <div class="section">
-          <div class="section-title"><span class="icon">🛒</span> Корзина <button type="button" class="btn btn-ghost btn-sm" id="btnDebugItem" style="margin-left:8px">🔍 debug item</button></div>
+          <div class="section-title"><span class="icon">🛒</span> Корзина</div>
           <div class="card"><div id="cartContent"><p class="empty">Корзина пуста</p></div></div>
         </div>
       </div>
@@ -771,22 +771,6 @@ $('btnFavItemSave').addEventListener('click',async()=>{
   renderFavItems();
 });
 
-/* Попытаться добавить товар, перебирая кандидатов item_id (Яндекс принимает разные форматы). */
-async function addToCartTry(token, slug, candidates, qty, business) {
-  for (const cid of candidates) {
-    if (!cid) continue;
-    try {
-      const rr = await fetch('/api/eda/' + token + '/cart', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({place_slug: slug, item_id: cid, qty: qty, business: business})
-      });
-      const dd = await rr.json().catch(() => ({}));
-      if (dd.ok !== false && !dd.error) return {ok: true, used: cid};
-    } catch (e) {}
-  }
-  return {ok: false};
-}
-
 /* ===== FAVORITE CARTS ===== */
 function renderFavorites(){
   const box=$('favContent');if(!box)return;
@@ -819,12 +803,14 @@ function renderFavorites(){
       const biz=f.business||'restaurant';
       const items=f.items||[];let ok=0,fail=0,total=items.length;
       for(const it of items){
-        const raw=[it.item_uid, it.item_id, it.mi_id, it.mi_uid].filter(Boolean);
-        const cands=[];
-        raw.forEach(x=>{ cands.push(x); if(/[0-9a-f]{8}-/i.test(x)) cands.push('menu item '+x); });
-        if(!cands.length){total--;continue;}
-        const res=await addToCartTry(TOKEN, slug, cands, it.quantity||1, biz);
-        if(res.ok) ok++; else { fail++; if(fail<=2) toast('⚠ не добавлен: '+(it.name||it.item_uid||''),'error'); }
+        const itemId=it.item_uid||it.item_id;if(!itemId){total--;continue;}
+        try{
+          const rr=await fetch('/api/eda/'+TOKEN+'/cart',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({place_slug:slug,item_id:itemId,qty:it.quantity||1,business:biz})});
+          const dd=await rr.json().catch(()=>({}));
+          if(dd.ok===false||dd.error){fail++;if(fail<=2)toast('⚠ '+esc(dd.error||'ошибка API'),'error');}
+          else ok++;
+        }catch(e){fail++;}
       }
       if(fail>0) toast('Добавлено '+ok+'/'+total+(fail?' (ошибок: '+fail+')':''), fail===total?'error':'warning');
       else toast('✅ Добавлено '+ok+'/'+total,'success');
@@ -906,17 +892,6 @@ async function loadCart(){
     html+='</div><div class="copy-results" id="copyResults"></div>';
     box.innerHTML=html;
     $('btnRefreshCart').addEventListener('click',loadCart);
-    $('btnDebugItem').addEventListener('click',async()=>{
-      if(!TOKEN){toast('Выберите аккаунт','warning');return;}
-      try{
-        const r=await fetch('/api/eda/'+TOKEN+'/carts');const d=await r.json();
-        const carts=d.carts||[];let found=null;
-        for(const c of carts){ if(c.items&&c.items.length){found=c.items[0];break;} }
-        if(!found){for(const c of carts){ if((c.cart&&c.cart.items&&c.cart.items.length)){found=c.cart.items[0];break;} }}
-        if(!found){alert('Нет товаров в корзине');return;}
-        alert('CART ITEM JSON:\n\n'+JSON.stringify(found,null,2));
-      }catch(e){alert('err: '+e);}
-    });
     $('btnSaveCart').addEventListener('click',saveActiveCarts);
     $('btnCopySel').addEventListener('click',copySelectedCarts);
     $('btnSelectAllCart').addEventListener('click',()=>{const checks=box.querySelectorAll('.cart-check');const allChecked=Array.from(checks).every(c=>c.checked);checks.forEach(c=>c.checked=!allChecked);});
@@ -924,7 +899,7 @@ async function loadCart(){
       e.preventDefault();const ci=+b.dataset.ci,ac=_allCarts[ci];if(!ac)return;
       const slug=ac.place_slug;
       const biz=ac.place_business||'restaurant';
-      const fullItems=(ac.items||[]).map(it=>{const mi=it.place_menu_item||{};const uid=mi.id||it.item_uid||mi.uid||it.item_id;return{item_uid:uid,item_id:it.item_id,mi_id:mi.id,mi_uid:mi.uid,name:mi.name||it.name,price:it.price||0,quantity:it.quantity||1};});
+      const fullItems=(ac.items||[]).map(it=>{const mi=it.place_menu_item||{};const uid=it.id||mi.id||it.item_uid||mi.uid||it.item_id;return{item_uid:uid,item_id:uid,mi_id:mi.id,mi_uid:mi.uid,name:mi.name||it.name,price:it.price||0,quantity:it.quantity||1};});
       await fetch('/api/courier/favorites',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({name:ac.place_name,slug:slug,items:fullItems,total:fullItems.reduce((s,it)=>s+it.price*it.quantity,0),store_name:ac.place_name,source_token:TOKEN,business:biz})});
       toast('⭐ '+ac.place_name+' → избранное','success');renderFavorites();
@@ -972,8 +947,8 @@ async function loadCartItems(ci,ac){
       const price=it.price||mi.price||0;
       const promo=mi.promo_price||0;
       const qty=it.quantity||1;
-      const itemId=mi.id||it.item_uid||it.item_id||mi.uid||'';
-      const itemUid=String(mi.id||it.item_uid||mi.uid||it.item_id||'');
+      const itemId=it.id||mi.id||it.item_uid||it.item_id||mi.uid||'';
+      const itemUid=String(it.id||mi.id||it.item_uid||mi.uid||it.item_id||'');
       const isFav=favItems.some(f=>f.item_uid&&itemUid&&f.item_uid===itemUid);
       const biz=ac.place_business||'restaurant';
 
@@ -1068,7 +1043,7 @@ async function saveActiveCarts(){
     const d=await r.json();const allCarts=d.carts||[];let saved=0;
     for(const ac of allCarts){
       try{
-        const items=(ac.items||[]).map(it=>{const mi=it.place_menu_item||{};const uid=mi.id||it.item_uid||mi.uid||it.item_id;return{item_uid:uid,item_id:uid,name:mi.name||it.name,price:it.price||mi.price||0,quantity:it.quantity||1};});
+        const items=(ac.items||[]).map(it=>{const mi=it.place_menu_item||{};const uid=it.id||mi.id||it.item_uid||mi.uid||it.item_id;return{item_uid:uid,item_id:uid,name:mi.name||it.name,price:it.price||mi.price||0,quantity:it.quantity||1};});
         const total=ac.total||items.reduce((s,it)=>s+it.price*it.quantity,0);
         await fetch('/api/courier/cart',{method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({slug:ac.place_slug,items:items,total:total,store_name:ac.place_name||ac.place_slug})});saved++;
