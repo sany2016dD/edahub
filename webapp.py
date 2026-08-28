@@ -4172,7 +4172,8 @@ def api_courier_accounts_add():
     if not any(a['token'] == token for a in accounts):
         promo = None
         try:
-            promo = eda.check_promo(token)
+            s = eda_session(token)
+            promo = eda.check_promo(s['account'])
         except Exception:
             promo = None
         accounts.append({
@@ -4205,7 +4206,8 @@ def api_courier_account_promo(token):
     if not acc:
         return jsonify({'ok': False, 'error': 'not found'}), 404
     try:
-        promo = eda.check_promo(token)
+        s = eda_session(token)
+        promo = eda.check_promo(s['account'])
     except Exception as e:
         promo = None
     acc['promo'] = promo or ''
@@ -4213,7 +4215,8 @@ def api_courier_account_promo(token):
     raw = None
     if not promo:
         try:
-            raw = eda.promo_raw(token)
+            s = eda_session(token)
+            raw = eda.promo_raw(s['account'])
         except Exception as e:
             raw = {'error': str(e)}
     return jsonify({'ok': True, 'promo': promo or '', 'raw': raw})
