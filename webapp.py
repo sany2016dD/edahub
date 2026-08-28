@@ -4170,8 +4170,14 @@ def api_courier_accounts_add():
     profile_name = data.get('profile_name', '')
     db, accounts = _cd_section(login, 'accounts')
     if not any(a['token'] == token for a in accounts):
+        promo = None
+        try:
+            promo = eda.check_promo(token)
+        except Exception:
+            promo = None
         accounts.append({
             'token': token, 'name': name, 'profile_name': profile_name,
+            'promo': promo or '',
             'added': time.strftime('%Y-%m-%d %H:%M:%S'),
         })
         _save_courier_data(db)

@@ -1823,6 +1823,45 @@ def _web_call(acc, method, path, json_body=None, params=None, timeout=25):
         return {'_status': r.status_code, '_text': r.text[:1000]}
 
 
+def check_promo(account):
+    """Проверить промокод/информеры аккаунта через /api/v2/menu/goods.
+
+    Возвращает текст промокода (из communications.informers[].payload.text.value)
+    или None, если промокодов нет / запрос не удался.
+    """
+    acc = get_eda_account(account) if isinstance(account, str) else account
+    try:
+        if _use_web(acc):
+            d = _web_call(acc, 'GET', '/api/v2/menu/goods', params={'auto_translate': 'false'})
+        else:
+            lat, lon = _coords(acc, None, None)
+            d = _eda_call(acc, 'GET', '/api/v2/menu/goods', lat, lon, params={'auto_translate': 'false'})
+    except Exception:
+        return None
+    if not isinstance(d, dict):
+        return None
+    comms = d.get('communications') or {}
+    if not isinstance(comms, dict):
+        comms = {}
+    informers = comms.get('informers') or []
+    for inf in informers:
+        if not isinstance(inf, dict):
+            continue
+        payload = inf.get('payload') or {}
+        text = None
+        if isinstance(payload, dict):
+            tv = payload.get('text')
+            if isinstance(tv, dict):
+                text = tv.get('value')
+            elif isinstance(tv, str):
+                text = tv
+        if not text and isinstance(inf.get('text'), str):
+            text = inf.get('text')
+        if text:
+            return str(text)
+    return None
+
+
 def web_saved_addresses(account, lat=None, lon=None):
     """Сохранённые адреса аккаунта через веб-флоу (cookie Session_id).
 
