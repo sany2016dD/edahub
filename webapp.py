@@ -3783,7 +3783,7 @@ def api_market_reviews_status(task_id):
 
 # ---------- Демо-страница ----------
 DEMO_KEY = os.environ.get('DEMO_KEY', 'EDADI-keyvkdv9328629ksdkvsek')
-DEMO_ACCOUNTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'demo_accounts.json')
+DEMO_ACCOUNTS_FILE = os.path.join(core.DATA_DIR, 'demo_accounts.json')
 
 
 def _load_demo_accounts():
@@ -3862,7 +3862,7 @@ def api_demo_accounts_clear():
 
 
 # ---------- Пользователи (доступ к курьеру / демо) ----------
-USERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'users.json')
+USERS_FILE = os.path.join(core.DATA_DIR, 'users.json')
 
 
 def _load_users():
@@ -3935,7 +3935,7 @@ def api_admin_users_regen_key(login):
 
 
 # ---------- Ключи-подписки (одноразовые) ----------
-KEYS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'keys.json')
+KEYS_FILE = os.path.join(core.DATA_DIR, 'keys.json')
 
 
 def _load_keys():
@@ -4017,7 +4017,7 @@ def api_admin_keys_delete(code):
 
 
 # ---------- Курьер / сборщик корзин ----------
-COURIER_DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'courier_data.json')
+COURIER_DATA_FILE = os.path.join(core.DATA_DIR, 'courier_data.json')
 
 
 def _load_courier_data():

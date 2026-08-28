@@ -21,6 +21,8 @@ courier_data.json
 courier_data.json.lock
 users.json
 users.json.lock
+keys.json
+keys.json.lock
 demo_accounts.json
 cookies*.json
 capture_*.jsonl
