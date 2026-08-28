@@ -315,7 +315,7 @@ body{font-family:'Manrope',system-ui,sans-serif;background:var(--bg);color:var(-
           </div>
         </div>
         <div class="section">
-          <div class="section-title"><span class="icon">🛒</span> Корзина</div>
+          <div class="section-title"><span class="icon">🛒</span> Корзина <button type="button" class="btn btn-ghost btn-sm" id="btnDebugItem" style="margin-left:8px">🔍 debug</button></div>
           <div class="card"><div id="cartContent"><p class="empty">Корзина пуста</p></div></div>
         </div>
       </div>
@@ -892,6 +892,20 @@ async function loadCart(){
     html+='</div><div class="copy-results" id="copyResults"></div>';
     box.innerHTML=html;
     $('btnRefreshCart').addEventListener('click',loadCart);
+    $('btnDebugItem').addEventListener('click',async()=>{
+      if(!TOKEN){toast('Выберите аккаунт','warning');return;}
+      try{
+        const r=await fetch('/api/eda/'+TOKEN+'/carts');const d=await r.json();
+        const carts=d.carts||[];let slug=null;
+        for(const c of carts){ if((c.items&&c.items.length)||(c.cart&&c.cart.items&&c.cart.items.length)){slug=c.slug||c.place_slug;break;} }
+        if(!slug){alert('Нет корзин');return;}
+        const rd=await fetch('/api/eda/'+TOKEN+'/cart?place_slug='+encodeURIComponent(slug));const dd=await rd.json();
+        const c0=dd.cart||dd;
+        const items=((c0.items)||(c0.cart&&c0.cart.items)||[]);
+        if(!items.length){alert('Пусто в детальной корзине:\n'+JSON.stringify(dd).slice(0,500));return;}
+        alert('DETAIL CART ITEM JSON:\n\n'+JSON.stringify(items[0],null,2));
+      }catch(e){alert('err: '+e);}
+    });
     $('btnSaveCart').addEventListener('click',saveActiveCarts);
     $('btnCopySel').addEventListener('click',copySelectedCarts);
     $('btnSelectAllCart').addEventListener('click',()=>{const checks=box.querySelectorAll('.cart-check');const allChecked=Array.from(checks).every(c=>c.checked);checks.forEach(c=>c.checked=!allChecked);});
