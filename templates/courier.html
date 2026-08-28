@@ -75,7 +75,7 @@ body{font-family:'Manrope',system-ui,sans-serif;background:var(--bg);color:var(-
 .acc-name{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .acc-meta{font-size:10px;color:var(--muted)}
 .acc-orders{display:inline-block;background:var(--brand-s);color:var(--brand);padding:0 4px;border-radius:6px;font-size:10px;margin-left:4px;font-weight:600}
-.acc-promo{color:#ff3b3b;font-size:11px;font-weight:600;margin-top:3px;line-height:1.25;white-space:normal}
+.acc-promo{display:inline-block;background:rgba(34,197,94,.15);color:#16a34a;border:1px solid rgba(34,197,94,.32);padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;margin-top:3px;line-height:1.25;white-space:normal;max-width:100%}
 .acc-active-dot{width:8px;height:8px;border-radius:50%;background:var(--good);flex-shrink:0;animation:pulse 2s infinite}
 .del-acc{width:22px;height:22px;border:none;background:rgba(252,63,29,.08);color:var(--brand);border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
 .promo-acc{width:22px;height:22px;border:none;background:rgba(255,59,59,.1);color:#ff3b3b;border-radius:6px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
@@ -520,7 +520,7 @@ function renderAccounts() {
       '<div class="acc-info" data-idx="'+i+'"><div class="acc-name">'+esc(a.profile_name||a.name)+'</div>' +
        '<div class="acc-meta">'+esc(a.token?a.token.slice(0,16)+'…':'—')+' '+
        (orderCounts[a.token]!=null?'<span class="acc-orders">📦 '+orderCounts[a.token]+'</span>':'')+'</div>' +
-       (a.promo?'<div class="acc-promo">🔥 '+esc(a.promo)+'</div>':'') + '</div>' +
+       (a.promo?'<div class="acc-promo">'+esc(a.promo)+'</div>':'') + '</div>' +
        '<button class="promo-acc" data-idx="'+i+'" title="Обновить промо">🔥</button>' +
        '<button class="del-acc" data-idx="'+i+'" title="Удалить">✕</button></div>';
   }).join('');
