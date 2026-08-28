@@ -1843,6 +1843,26 @@ def _promo_slug(acc):
     return 'magnit_celevaya_ngmjk'
 
 
+def _promo_first(d):
+    """Рекурсивный запасной поиск промо-текста в любом text.value."""
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if isinstance(node.get('value'), str):
+                v = node['value'].strip()
+                if v and any(k in v.lower() for k in ('скидк', 'промокод', 'руб', '₽', 'бонус', 'акция')):
+                    found.append(v)
+            for val in node.values():
+                walk(val)
+        elif isinstance(node, list):
+            for val in node:
+                walk(val)
+
+    walk(d)
+    return found[0] if found else None
+
+
 def check_promo(account):
     """Проверить промокод/информеры аккаунта через /api/v2/menu/goods.
 
@@ -1884,7 +1904,7 @@ def check_promo(account):
             text = inf.get('text')
         if text:
             return str(text)
-    return None
+    return _promo_first(d)
 
 
 def promo_raw(account):
