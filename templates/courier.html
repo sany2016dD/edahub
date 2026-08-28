@@ -771,6 +771,22 @@ $('btnFavItemSave').addEventListener('click',async()=>{
   renderFavItems();
 });
 
+/* Попытаться добавить товар, перебирая кандидатов item_id (Яндекс принимает разные форматы). */
+async function addToCartTry(token, slug, candidates, qty, business) {
+  for (const cid of candidates) {
+    if (!cid) continue;
+    try {
+      const rr = await fetch('/api/eda/' + token + '/cart', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({place_slug: slug, item_id: cid, qty: qty, business: business})
+      });
+      const dd = await rr.json().catch(() => ({}));
+      if (dd.ok !== false && !dd.error) return {ok: true, used: cid};
+    } catch (e) {}
+  }
+  return {ok: false};
+}
+
 /* ===== FAVORITE CARTS ===== */
 function renderFavorites(){
   const box=$('favContent');if(!box)return;
@@ -803,14 +819,12 @@ function renderFavorites(){
       const biz=f.business||'restaurant';
       const items=f.items||[];let ok=0,fail=0,total=items.length;
       for(const it of items){
-        const itemId=it.item_uid||it.item_id;if(!itemId){total--;continue;}
-        try{
-          const rr=await fetch('/api/eda/'+TOKEN+'/cart',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({place_slug:slug,item_id:itemId,qty:it.quantity||1,business:biz})});
-          const dd=await rr.json().catch(()=>({}));
-          if(dd.ok===false||dd.error){fail++;if(fail<=2)toast('⚠ '+esc(dd.error||'ошибка API'),'error');}
-          else ok++;
-        }catch(e){fail++;}
+        const raw=[it.item_uid, it.item_id, it.mi_id, it.mi_uid].filter(Boolean);
+        const cands=[];
+        raw.forEach(x=>{ cands.push(x); if(/[0-9a-f]{8}-/i.test(x)) cands.push('menu item '+x); });
+        if(!cands.length){total--;continue;}
+        const res=await addToCartTry(TOKEN, slug, cands, it.quantity||1, biz);
+        if(res.ok) ok++; else { fail++; if(fail<=2) toast('⚠ не добавлен: '+(it.name||it.item_uid||''),'error'); }
       }
       if(fail>0) toast('Добавлено '+ok+'/'+total+(fail?' (ошибок: '+fail+')':''), fail===total?'error':'warning');
       else toast('✅ Добавлено '+ok+'/'+total,'success');
@@ -899,7 +913,7 @@ async function loadCart(){
       e.preventDefault();const ci=+b.dataset.ci,ac=_allCarts[ci];if(!ac)return;
       const slug=ac.place_slug;
       const biz=ac.place_business||'restaurant';
-      const fullItems=(ac.items||[]).map(it=>{const mi=it.place_menu_item||{};const uid=mi.id||it.item_uid||mi.uid||it.item_id;return{item_uid:uid,item_id:uid,name:mi.name||it.name,price:it.price||0,quantity:it.quantity||1};});
+      const fullItems=(ac.items||[]).map(it=>{const mi=it.place_menu_item||{};const uid=mi.id||it.item_uid||mi.uid||it.item_id;return{item_uid:uid,item_id:it.item_id,mi_id:mi.id,mi_uid:mi.uid,name:mi.name||it.name,price:it.price||0,quantity:it.quantity||1};});
       await fetch('/api/courier/favorites',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({name:ac.place_name,slug:slug,items:fullItems,total:fullItems.reduce((s,it)=>s+it.price*it.quantity,0),store_name:ac.place_name,source_token:TOKEN,business:biz})});
       toast('⭐ '+ac.place_name+' → избранное','success');renderFavorites();
