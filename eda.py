@@ -1648,8 +1648,11 @@ def add_to_cart(account, slug, item_id, qty=1, item_options=None, lat=None, lon=
     """
     acc = get_eda_account(account) if isinstance(account, str) else account
     lat, lon = _coords(acc, lat, lon)
+    raw_id = str(item_id).strip()
+    if raw_id and not raw_id.lower().startswith('menu item '):
+        raw_id = 'menu item ' + raw_id
     body = {
-        'item_id': str(item_id),
+        'item_id': raw_id,
         'quantity': int(qty) if qty is not None else 1,
         'item_options': item_options or [],
         'place_business': business,
