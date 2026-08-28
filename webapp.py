@@ -29,6 +29,7 @@ def guard():
             p.startswith('/api/pickup/') or p.startswith('/c/') or p == '/login' or
             p == '/api/activate-key' or
             p.startswith('/courier') or p.startswith('/api/courier/') or
+            p.startswith('/api/eda/qr/') or p.startswith('/qr') or
             p.startswith('/demo') or p.startswith('/api/demo/') or
             (p.startswith('/api/coupons/shares/') and p.endswith('/data'))):
         return None
