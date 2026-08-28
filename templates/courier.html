@@ -903,7 +903,18 @@ async function loadCart(){
         const c0=dd.cart||dd;
         const items=((c0.items)||(c0.cart&&c0.cart.items)||[]);
         if(!items.length){alert('Пусто в детальной корзине:\n'+JSON.stringify(dd).slice(0,500));return;}
-        alert('DETAIL CART ITEM JSON:\n\n'+JSON.stringify(items[0],null,2));
+        const it=items[0];const mi=it.place_menu_item||it.menu_item||{};
+        const cand={
+          'it.id': it.id,
+          'it.item_uid': it.item_uid,
+          'it.public_id': it.public_id,
+          'mi.id': mi.id,
+          'mi.uid': mi.uid,
+          'mi.item_uid': mi.item_uid,
+          'mi.public_id': mi.public_id,
+          'mi.all_keys': Object.keys(mi)
+        };
+        alert('CANDIDATE IDS:\n\n'+JSON.stringify(cand,null,2));
       }catch(e){alert('err: '+e);}
     });
     $('btnSaveCart').addEventListener('click',saveActiveCarts);
