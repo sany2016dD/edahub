@@ -33,6 +33,8 @@ def guard():
             p.startswith('/demo') or p.startswith('/api/demo/') or
             (p.startswith('/api/coupons/shares/') and p.endswith('/data'))):
         return None
+    if session.get('courier_user') and p.startswith('/api/eda/'):
+        return None
     if session.get('admin'):
         return None
     if p.startswith('/api/'):
