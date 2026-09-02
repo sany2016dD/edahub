@@ -25,7 +25,7 @@ def guard():
     if not ADMIN_PASSWORD:
         return None
     p = request.path
-    if (p.startswith('/static') or p.startswith('/p/') or
+    if (p == '/health' or p.startswith('/static') or p.startswith('/p/') or
             p.startswith('/api/pickup/') or p.startswith('/c/') or p == '/login' or
             p == '/api/activate-key' or
             p.startswith('/courier') or p.startswith('/api/courier/') or
@@ -99,6 +99,11 @@ def run_in_thread(name):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/health')
+def health():
+    return 'ok', 200
 
 
 @app.route('/api/accounts')
