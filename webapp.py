@@ -5036,6 +5036,21 @@ def api_dl_sessions_delete(token):
     return jsonify({'ok': True})
 
 
+@app.route('/api/dl/qr/start', methods=['POST'])
+def api_dl_qr_start():
+    data = request.get_json(silent=True) or {}
+    try:
+        qr_id, link = delivery.delivery_qr_start(data.get('account', ''))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    return jsonify({'ok': True, 'qr_id': qr_id, 'link': link})
+
+
+@app.route('/api/dl/qr/status/<qr_id>')
+def api_dl_qr_status(qr_id):
+    return jsonify(delivery.delivery_qr_status(qr_id))
+
+
 def _start_sales_bot():
     """Запустить бот активации ключей в фоновом потоке (Railway).
 

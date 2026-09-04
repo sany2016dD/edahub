@@ -2188,6 +2188,67 @@ $('dlAccAdd').addEventListener('click', async () => {
   } catch (e) { alert(e.message); } finally { btn.disabled = false; }
 });
 
+// ---- добавление аккаунта Делливери по QR (как у Я.Еды) ----
+let dlQrTimer = null;
+function dlQrStopPoll() { if (dlQrTimer) { clearInterval(dlQrTimer); dlQrTimer = null; } }
+function dlQrSetStatus(html) { $('dlQrStatus').innerHTML = html; }
+
+$('dlQrStart').addEventListener('click', async () => {
+  const btn = $('dlQrStart'); btn.disabled = true;
+  dlQrStopPoll();
+  try {
+    const d = await api('/api/dl/qr/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account: $('dlQrName').value.trim() }),
+    });
+    dlQrId = d.qr_id;
+    $('dlQrLink').textContent = d.link;
+    $('dlQrLink').setAttribute('data-link', d.link);
+    $('dlQrImg').innerHTML = azQrSvg(d.link);
+    $('dlQrLinkWrap').classList.remove('hidden');
+    dlQrSetStatus('<span class="db-mut">Ожидание подтверждения в Яндекс-приложении…</span>');
+    dlQrTimer = setInterval(dlQrPoll, 1500);
+    dlQrPoll();
+  } catch (e) {
+    dlQrSetStatus('<span style="color:var(--danger,#e5484d)">Ошибка: ' + esc(e.message) + '</span>');
+  } finally {
+    btn.disabled = false;
+  }
+});
+let dlQrId = null;
+
+async function dlQrPoll() {
+  if (!dlQrId) return;
+  try {
+    const d = await api('/api/dl/qr/status/' + dlQrId);
+    if (d.state === 'waiting') {
+      dlQrSetStatus('<span class="db-mut">' + esc(d.hint ? 'Ожидание: ' + d.hint : 'Ожидание подтверждения…') + '</span>');
+      return;
+    }
+    dlQrStopPoll();
+    if (d.state === 'ok') {
+      dlQrSetStatus('<span style="color:var(--ok,#16a34a)">✓ Аккаунт добавлен: ' + esc(d.account) + '</span>');
+      loadDelivery();
+    } else if (d.state === 'expired') {
+      dlQrSetStatus('<span class="db-mut">Ссылка устарела. Нажмите «Создать QR» заново.</span>');
+    } else {
+      dlQrSetStatus('<span style="color:var(--danger,#e5484d)">' + esc(d.message || d.state) + '</span>');
+    }
+  } catch (e) {
+    dlQrStopPoll();
+    dlQrSetStatus('<span style="color:var(--danger,#e5484d)">Сеть: ' + esc(e.message) + '</span>');
+  }
+}
+
+$('dlQrCopy').addEventListener('click', () => {
+  const l = $('dlQrLink').getAttribute('data-link');
+  if (navigator.clipboard && l) navigator.clipboard.writeText(l).catch(() => {});
+});
+$('dlQrOpen').addEventListener('click', () => {
+  const l = $('dlQrLink').getAttribute('data-link');
+  if (l) window.open(l, '_blank');
+});
+
 async function loadDlSessions() {
   try {
     const d = await api('/api/dl/sessions');

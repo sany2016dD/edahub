@@ -667,4 +667,161 @@ def _DEFAULT_COOKIE():
     return 'Eats-Session=61d8f4bc01c74adda5d32f86b033bcfc'
 
 
+# ---------- добавление аккаунта по QR (как у Я.Еды) ----------
+# Полный аналог eda.qr_start/eda.qr_status, но результат сохраняется в
+# аккаунты Делливери (bearer-токен получается через exchange_sessionid).
+import threading as _threading
+
+_DL_QR_STATE = {}
+_DL_QR_LOCK = _threading.Lock()
+_DL_QR_TTL = 600
+_DL_PASSPORT_PWL = 'https://passport.yandex.ru/pwl-yandex'
+
+
+def _dl_qr_headers(csrf):
+    return {
+        'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                       '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'),
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-CSRF-Token': csrf,
+    }
+
+
+def delivery_qr_start(account_name=''):
+    """Создать QR-сессию входа Я.Еды/Делливери. Возвращает (qr_id, link).
+
+    Пользователь сканирует link Яндекс-приложением; при подтверждении
+    delivery_qr_status обменяет Session_id на OAuth-токен и сохранит
+    аккаунт Делливери.
+    """
+    s = requests.Session()
+    try:
+        r = s.get(_DL_PASSPORT_PWL, headers=_dl_qr_headers(''), timeout=25)
+        r.raise_for_status()
+        m = re.search(r'__CSRF__\s*=\s*"([^"]+)"', r.text)
+        if not m:
+            raise RuntimeError('passport: CSRF не найден в странице')
+        csrf = m.group(1)
+        h = _dl_qr_headers(csrf)
+        r = s.post(_DL_PASSPORT_PWL + '/api/passport/auth/password/submit',
+                   headers=h, data=json.dumps({'retpath': 'https://passport.yandex.ru/'}), timeout=25)
+        r.raise_for_status()
+        magic = r.json()
+        track_id = magic.get('track_id') or ''
+        csrf_token = magic.get('csrf_token') or ''
+        if not track_id:
+            raise RuntimeError('passport: нет track_id: ' + r.text[:200])
+        r = s.post(_DL_PASSPORT_PWL + '/api/passport/auth/magic/code',
+                   headers=h,
+                   data=json.dumps({'location_id': '0', 'magic_track_id': track_id, 'track_id': ''}),
+                   timeout=25)
+        r.raise_for_status()
+        link = r.json().get('link') or ''
+        if not link:
+            raise RuntimeError('passport: нет link: ' + r.text[:200])
+    except requests.RequestException as e:
+        raise RuntimeError(f'passport: сеть: {e}')
+    qr_id = uuid.uuid4().hex
+    with _DL_QR_LOCK:
+        _DL_QR_STATE[qr_id] = {
+            'session': s, 'csrf': csrf, 'magic_track_id': track_id,
+            'csrf_token': csrf_token, 'link': link, 'created_at': time.time(),
+            'account_name': (account_name or '').strip(),
+        }
+    return qr_id, link
+
+
+def delivery_qr_status(qr_id):
+    """Поллинг статуса QR-входа Делливери.
+
+    Возвращает {'state': 'waiting'|'ok'|'expired'|'error', ...}. При 'ok'
+    аккаунт уже создан/обновлён с bearer-токеном (authorization), cookie и uid.
+    """
+    import eda as _eda
+    with _DL_QR_LOCK:
+        st = _DL_QR_STATE.get(qr_id)
+    if not st:
+        return {'state': 'error', 'message': 'сессия не найдена (сервер перезапущен?)'}
+    if time.time() - st['created_at'] > _DL_QR_TTL:
+        with _DL_QR_LOCK:
+            _DL_QR_STATE.pop(qr_id, None)
+        return {'state': 'expired', 'message': 'ссылка устарела — создайте новую'}
+    h = _dl_qr_headers(st['csrf'])
+    try:
+        r = st['session'].post(_DL_PASSPORT_PWL + '/api/passport/auth/magic/code/status',
+                               headers=h, data=json.dumps({
+                                   'track_id': st['magic_track_id'], 'csrf_token': st['csrf_token'],
+                                   'yandexAllowedDomains': []}), timeout=25)
+        r.raise_for_status()
+        d = r.json()
+    except requests.RequestException as e:
+        return {'state': 'error', 'message': f'поллинг: {e}'}
+    state = d.get('state')
+    if state in (None, 'otp_auth_not_ready'):
+        return {'state': 'waiting'}
+    if state == 'auth_challenge':
+        return {'state': 'waiting', 'hint': 'нужно доп. подтверждение в Яндекс-приложении'}
+    if state != 'otp_auth_finished':
+        return {'state': 'waiting', 'hint': f'state={state}'}
+    track_id = d.get('trackId')
+    if not track_id:
+        return {'state': 'error', 'message': f'нет trackId: {d}'}
+    try:
+        r = st['session'].post(_DL_PASSPORT_PWL + '/api/passport/sessions/get_session',
+                               headers=h, data=json.dumps({'track_id': track_id}), timeout=25)
+        r.raise_for_status()
+    except requests.RequestException as e:
+        return {'state': 'error', 'message': f'get_session: {e}'}
+    ck = {c.name: c.value for c in st['session'].cookies}
+    session_id = ck.get('Session_id') or ''
+    if not session_id:
+        return {'state': 'error', 'message': f'нет Session_id в cookies: {ck}'}
+    # Обмениваем Session_id на OAuth Bearer-токен (тот же путь, что у Я.Еды).
+    try:
+        bearer, uid = _eda.exchange_sessionid(session_id)
+    except Exception as e:
+        return {'state': 'error', 'message': f'обмен Session_id на токен: {e}'}
+    bearer = bearer if bearer.startswith('Bearer ') else 'Bearer ' + bearer
+    name = st.get('account_name', '')
+    cookie = 'Eats-Session=' + session_id
+    try:
+        accs = load_delivery_accounts()
+        target = None
+        if name:
+            for a in accs:
+                if a.get('name') == name:
+                    target = a
+                    break
+        if target is None:
+            for a in accs:
+                cc = a.get('creds') or {}
+                if cc.get('cookie') == cookie:
+                    target = a
+                    break
+        if target is None:
+            target = {
+                'name': name or ('delivery_' + session_id[:8]),
+                'lat': DEFAULT_LAT, 'lon': DEFAULT_LON,
+                'creds': {'authorization': bearer, 'cookie': cookie,
+                          'x_yandex_uid': uid if uid else ck.get('yandexuid', '')},
+                'created_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+            }
+            accs.append(target)
+        else:
+            cc = target.setdefault('creds', {})
+            cc['authorization'] = bearer
+            cc['cookie'] = cookie
+            if uid:
+                cc['x_yandex_uid'] = uid
+            elif ck.get('yandexuid'):
+                cc['x_yandex_uid'] = ck['yandexuid']
+        save_delivery_accounts(accs)
+    except Exception as e:
+        return {'state': 'error', 'message': f'сохранение аккаунта: {e}'}
+    with _DL_QR_LOCK:
+        _DL_QR_STATE.pop(qr_id, None)
+    return {'state': 'ok', 'account': target.get('name'), 'bearer': bearer[:20] + '…'}
+
+
 ensure_default_account()

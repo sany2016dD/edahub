@@ -541,6 +541,32 @@
           </div>
         </div>
       </div>
+      <div class="card" style="padding:16px;margin-bottom:16px;background:var(--panel);border:1px solid var(--border);border-radius:14px">
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start">
+          <div style="flex:1;min-width:260px">
+            <h4 style="margin:0 0 8px;font-size:14px">Добавить по QR (как аккаунты Яндекса)</h4>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
+              Сгенерируйте ссылку, отсканируйте её Яндекс-приложением и подтвердите вход.
+              Session_id обменяется на bearer-токен автоматически.
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <label style="font-size:12px;color:var(--muted)">Имя нового аккаунта
+                <input type="text" id="dlQrName" class="db-search" placeholder="delivery_qq" autocomplete="off" style="margin-top:4px;width:200px">
+              </label>
+              <div><button class="btn" id="dlQrStart" style="min-height:38px">Создать QR</button></div>
+            </div>
+            <div id="dlQrLinkWrap" class="hidden" style="margin-top:10px">
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <span class="mono db-mut" style="word-break:break-all;font-size:11px;max-width:460px" id="dlQrLink"></span>
+                <button class="btn btn-ghost btn-sm" id="dlQrCopy">Копировать</button>
+                <button class="btn btn-ghost btn-sm" id="dlQrOpen">Открыть</button>
+              </div>
+              <div id="dlQrImg" style="margin-top:10px;background:#fff;border-radius:10px;display:inline-block;padding:8px"></div>
+              <div id="dlQrStatus" style="margin-top:10px;font-size:12.5px"></div>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="card table-card">
         <table class="db-table">
           <thead><tr>
