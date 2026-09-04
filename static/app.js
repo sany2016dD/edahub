@@ -78,14 +78,14 @@ function switchTab(name) {
 document.querySelectorAll('#dbTabs .db-tab').forEach(b => b.addEventListener('click', () => {
   switchTab(b.dataset.tab);
   const loaders = { accounts: loadAdminAccounts, purchases: loadPurchases, coupons: loadCoupons,
-    prizes: loadPrizes, sessions: loadSessions, card: loadCardAdmin, eda: loadEda, auto: loadAuto, samokat: loadSamokat, market: initMarketWow };
+    prizes: loadPrizes, sessions: loadSessions, card: loadCardAdmin, eda: loadEda, auto: loadAuto, samokat: loadSamokat, market: initMarketWow, delivery: loadDelivery };
   if (loaders[b.dataset.tab]) loaders[b.dataset.tab]();
 }));
 
 $('btnRefresh').addEventListener('click', () => {
   const active = document.querySelector('#dbTabs .db-tab.active');
   const loaders = { accounts: loadAdminAccounts, purchases: loadPurchases, coupons: loadCoupons,
-    prizes: loadPrizes, sessions: loadSessions, card: loadCardAdmin, eda: loadEda, auto: loadAuto, samokat: loadSamokat, market: initMarketWow };
+    prizes: loadPrizes, sessions: loadSessions, card: loadCardAdmin, eda: loadEda, auto: loadAuto, samokat: loadSamokat, market: initMarketWow, delivery: loadDelivery };
   loadOverview();
   if (active && loaders[active.dataset.tab]) loaders[active.dataset.tab]();
 });
@@ -2111,6 +2111,126 @@ $('skSessCreate').addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
   }
+});
+
+// ================= Делливери (админ) =================
+let dlAccounts = [];
+function subTabDelivery(name) {
+  document.querySelectorAll('#pane-delivery .db-tabs.sub .db-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  $('pane-dlAccs').classList.toggle('active', name === 'dlAccs');
+  $('pane-dlSess').classList.toggle('active', name === 'dlSess');
+}
+const dlSubTabs = document.querySelectorAll('#pane-delivery .db-tabs.sub .db-tab');
+if (dlSubTabs.length) dlSubTabs.forEach(b => b.addEventListener('click', () => subTabDelivery(b.dataset.tab)));
+
+async function loadDelivery() {
+  await Promise.all([loadDlAccounts(), loadDlSessions()]);
+  fillDlAccountSelect();
+}
+
+async function loadDlAccounts() {
+  try {
+    dlAccounts = await api('/api/dl/accounts');
+    const tb = $('dlAccTable').querySelector('tbody');
+    tb.innerHTML = (dlAccounts.accounts || []).map(a => `
+      <tr>
+        <td><b>${esc(a.name)}</b></td>
+        <td>${a.has_bearer ? '<span class="sd-badge ok">токен</span>' : '<span class="db-mut">нет</span>'}
+            ${a.has_cookie ? '<span class="sd-badge ok" style="margin-left:4px">cookie</span>' : ''}</td>
+        <td class="num">${esc(a.lat)}</td>
+        <td class="num">${esc(a.lon)}</td>
+        <td class="num">${esc(a.x_version || '—')}</td>
+        <td class="col-actions">
+          <div class="row-actions">
+            <button class="btn btn-danger btn-sm" data-del="${esc(a.name)}">Удалить</button>
+          </div>
+        </td>
+      </tr>`).join('') || '<tr><td colspan="6" class="db-empty">Аккаунтов Делливери нет</td></tr>';
+    tb.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+      if (!confirm('Удалить аккаунт ' + b.dataset.del + '?')) return;
+      await api('/api/dl/accounts/' + encodeURIComponent(b.dataset.del), { method: 'DELETE' });
+      loadDelivery();
+    }));
+  } catch (e) {
+    $('dlAccTable').querySelector('tbody').innerHTML = `<tr><td colspan="6" class="db-empty">${esc(e.message)}</td></tr>`;
+  }
+}
+
+function fillDlAccountSelect() {
+  const sel = $('dlSessAccount');
+  if (!sel) return;
+  sel.innerHTML = '';
+  (dlAccounts.accounts || []).forEach(a => {
+    const o = document.createElement('option');
+    o.value = a.name; o.textContent = a.name;
+    sel.appendChild(o);
+  });
+}
+
+$('dlAccAdd').addEventListener('click', async () => {
+  const btn = $('dlAccAdd'); btn.disabled = true;
+  try {
+    await api('/api/dl/accounts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: $('dlName').value.trim(),
+        lat: parseFloat($('dlLat').value) || 55.028785,
+        lon: parseFloat($('dlLon').value) || 73.275838,
+        creds: {
+          authorization: $('dlBearer').value.trim(),
+          cookie: $('dlCookie').value.trim(),
+          x_yandex_uid: $('dlUid').value.trim(),
+        },
+      }),
+    });
+    $('dlName').value = ''; $('dlBearer').value = ''; $('dlCookie').value = ''; $('dlUid').value = '';
+    loadDelivery();
+  } catch (e) { alert(e.message); } finally { btn.disabled = false; }
+});
+
+async function loadDlSessions() {
+  try {
+    const d = await api('/api/dl/sessions');
+    const entries = (d.sessions || []).filter(v => v.active);
+    const tb = $('dlSessTable').querySelector('tbody');
+    tb.innerHTML = entries.map(s => `
+      <tr>
+        <td><b>${esc(s.name)}</b></td>
+        <td><b>${esc(s.account)}</b></td>
+        <td><span class="mono db-mut">${esc(location.origin + '/dl/' + s.token)}</span></td>
+        <td class="num">${esc(s.expires_at || '—')}</td>
+        <td class="col-actions">
+          <div class="row-actions">
+            <button class="btn btn-ghost btn-sm" data-copy="${esc(location.origin + '/dl/' + s.token)}">Копировать</button>
+            <button class="btn btn-danger btn-sm" data-revoke="${s.token}">Отозвать</button>
+          </div>
+        </td>
+      </tr>`).join('') || '<tr><td colspan="5" class="db-empty">Активных сессий Делливери нет</td></tr>';
+    tb.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => copyText(b.dataset.copy, b)));
+    tb.querySelectorAll('[data-revoke]').forEach(b => b.addEventListener('click', async () => {
+      await api('/api/dl/sessions/' + b.dataset.revoke, { method: 'DELETE' });
+      loadDlSessions();
+    }));
+  } catch (e) {
+    $('dlSessTable').querySelector('tbody').innerHTML = `<tr><td colspan="5" class="db-empty">${esc(e.message)}</td></tr>`;
+  }
+}
+
+$('dlSessCreate').addEventListener('click', async () => {
+  const btn = $('dlSessCreate'); btn.disabled = true;
+  try {
+    const r = await api('/api/dl/sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: $('dlSessName').value.trim(),
+        account: $('dlSessAccount').value,
+        hours: parseInt($('dlSessHours').value, 10) || 24,
+      }),
+    });
+    $('dlSessName').value = '';
+    copyText(r.url, btn);
+    loadDlSessions();
+  } catch (e) { alert(e.message); } finally { btn.disabled = false; }
 });
 
 // ================= logs modal =================

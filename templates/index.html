@@ -74,6 +74,7 @@
     <button class="db-tab" data-tab="sp">🅿 Свои Плюсы</button>
     <button class="db-tab" data-tab="samokat">🛴 Самокат</button>
     <button class="db-tab" data-tab="market">🛒 Маркет</button>
+    <button class="db-tab" data-tab="delivery">🚚 Делливери</button>
     <button class="db-tab" data-tab="users">👥 Пользователи</button>
   </nav>
 
@@ -504,6 +505,77 @@
       </div>
       <div id="mktWowResults" style="margin-top:16px"></div>
       <div id="mktReviewLog" class="mkt-log" style="margin-top:16px;display:none"></div>
+    </div>
+  </section>
+
+  <!-- ================= Делливери ================= -->
+  <section class="db-pane" id="pane-delivery">
+    <div class="db-tabs sub">
+      <button class="db-tab active" data-tab="dlAccs">Аккаунты</button>
+      <button class="db-tab" data-tab="dlSess">Сессии</button>
+    </div>
+
+    <div class="db-pane active" id="pane-dlAccs">
+      <div class="card" style="padding:16px;margin-bottom:16px;background:var(--panel);border:1px solid var(--border);border-radius:14px">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <label style="font-size:12px;color:var(--muted)">Имя
+            <input type="text" id="dlName" class="db-search" placeholder="delivery_live" autocomplete="off" style="margin-top:4px">
+          </label>
+          <label style="font-size:12px;color:var(--muted)">lat
+            <input type="text" id="dlLat" class="db-search" placeholder="55.028785" autocomplete="off" style="margin-top:4px;width:110px">
+          </label>
+          <label style="font-size:12px;color:var(--muted)">lon
+            <input type="text" id="dlLon" class="db-search" placeholder="73.275838" autocomplete="off" style="margin-top:4px;width:110px">
+          </label>
+          <label style="font-size:12px;color:var(--muted)">Bearer-токен
+            <input type="text" id="dlBearer" class="db-search" placeholder="OAuth ..." autocomplete="off" style="margin-top:4px;width:320px">
+          </label>
+          <label style="font-size:12px;color:var(--muted)">Cookie
+            <input type="text" id="dlCookie" class="db-search" placeholder="cookie (необязательно)" autocomplete="off" style="margin-top:4px;width:260px">
+          </label>
+          <label style="font-size:12px;color:var(--muted)">x-yandex-uid
+            <input type="text" id="dlUid" class="db-search" placeholder="uid (необязательно)" autocomplete="off" style="margin-top:4px;width:180px">
+          </label>
+          <div>
+            <button class="btn" id="dlAccAdd" style="min-height:38px">Добавить аккаунт</button>
+          </div>
+        </div>
+      </div>
+      <div class="card table-card">
+        <table class="db-table">
+          <thead><tr>
+            <th>Имя</th><th>Доступ</th><th>lat</th><th>lon</th><th>X-Version</th><th></th>
+          </tr></thead>
+          <tbody id="dlAccTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="db-pane" id="pane-dlSess">
+      <div class="card" style="padding:16px;margin-bottom:16px;background:var(--panel);border:1px solid var(--border);border-radius:14px">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <label style="font-size:12px;color:var(--muted)">Имя сессии
+            <input type="text" id="dlSessName" class="db-search" placeholder="напр. om-session" autocomplete="off" style="margin-top:4px">
+          </label>
+          <label style="font-size:12px;color:var(--muted)">Аккаунт
+            <select id="dlSessAccount" class="db-search" style="margin-top:4px;width:200px"></select>
+          </label>
+          <label style="font-size:12px;color:var(--muted)">Часов
+            <input type="number" id="dlSessHours" class="db-search" value="24" autocomplete="off" style="margin-top:4px;width:80px">
+          </label>
+          <div>
+            <button class="btn" id="dlSessCreate" style="min-height:38px">Создать сессию</button>
+          </div>
+        </div>
+      </div>
+      <div class="card table-card">
+        <table class="db-table">
+          <thead><tr>
+            <th>Имя</th><th>Аккаунт</th><th>Ссылка</th><th>Истекает</th><th></th>
+          </tr></thead>
+          <tbody id="dlSessTable"></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
