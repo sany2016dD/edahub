@@ -2125,8 +2125,7 @@ const dlSubTabs = document.querySelectorAll('#pane-delivery .db-tabs.sub .db-tab
 if (dlSubTabs.length) dlSubTabs.forEach(b => b.addEventListener('click', () => subTabDelivery(b.dataset.tab)));
 
 async function loadDelivery() {
-  await Promise.all([loadDlAccounts(), loadDlSessions()]);
-  fillDlAccountSelect();
+  await Promise.all([loadDlAccounts(), loadDlSessions().catch(() => {})]);
 }
 
 async function loadDlAccounts() {
@@ -2154,10 +2153,11 @@ async function loadDlAccounts() {
     }));
   } catch (e) {
     $('dlAccTable').querySelector('tbody').innerHTML = `<tr><td colspan="6" class="db-empty">${esc(e.message)}</td></tr>`;
+  } finally {
+    fillDeliveryAccountSelect();
   }
 }
-
-function fillDlAccountSelect() {
+function fillDeliveryAccountSelect() {
   const sel = $('dlSessAccount');
   if (!sel) return;
   sel.innerHTML = '';
@@ -2167,6 +2167,8 @@ function fillDlAccountSelect() {
     sel.appendChild(o);
   });
 }
+
+function fillDlAccountSelect() { fillDeliveryAccountSelect(); }
 
 $('dlAccAdd').addEventListener('click', async () => {
   const btn = $('dlAccAdd'); btn.disabled = true;
