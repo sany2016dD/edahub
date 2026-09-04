@@ -708,6 +708,23 @@ def _dl_qr_headers(csrf):
     }
 
 
+def _dl_new_device_headers():
+    """Сгенерировать набор app/device-заголовков, которые требуются dc.eda.yandex.net.
+
+    Без X-Device-Id API отдаёт 400 "Missing or empty 'X-Device-Id' header".
+    """
+    def u():
+        return str(uuid.uuid4())
+    return {
+        'x_device_id': u(),
+        'x_appmetrica_deviceid': u(),
+        'x_appmetrica_uuid': u(),
+        'x_client_session': u(),
+        'x_tracker_id': u(),
+        'x_mob_id': u(),
+    }
+
+
 def delivery_qr_start(account_name=''):
     """Создать QR-сессию входа Я.Еды/Делливери. Возвращает (qr_id, link).
 
@@ -814,7 +831,10 @@ def delivery_qr_status(qr_id):
         return {'state': 'error', 'message': f'обмен Session_id на токен: {e}'}
     bearer = bearer if bearer.startswith('Bearer ') else 'Bearer ' + bearer
     name = st.get('account_name', '')
-    cookie = 'Eats-Session=' + session_id
+    # cookie: берём Eats-Session из захваченных cookies, если есть; иначе Session_id.
+    eats_session = ck.get('Eats-Session') or ck.get('Session_id') or session_id
+    cookie = 'Eats-Session=' + eats_session
+    dev = _dl_new_device_headers()
     try:
         accs = load_delivery_accounts()
         target = None
@@ -833,13 +853,15 @@ def delivery_qr_status(qr_id):
             target = {
                 'name': name or ('delivery_' + session_id[:8]),
                 'lat': DEFAULT_LAT, 'lon': DEFAULT_LON,
-                'creds': {'authorization': bearer, 'cookie': cookie,
-                          'x_yandex_uid': uid if uid else ck.get('yandexuid', '')},
+                'creds': dict(dev, authorization=bearer, cookie=cookie,
+                              x_yandex_uid=uid if uid else ck.get('yandexuid', '')),
                 'created_at': time.strftime('%Y-%m-%d %H:%M:%S'),
             }
             accs.append(target)
         else:
             cc = target.setdefault('creds', {})
+            for k, v in dev.items():
+                cc.setdefault(k, v)
             cc['authorization'] = bearer
             cc['cookie'] = cookie
             if uid:
