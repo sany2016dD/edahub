@@ -2119,6 +2119,7 @@ function subTabDelivery(name) {
   document.querySelectorAll('#pane-delivery .db-tabs.sub .db-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   $('pane-dlAccs').classList.toggle('active', name === 'dlAccs');
   $('pane-dlSess').classList.toggle('active', name === 'dlSess');
+  if (name === 'dlSess') loadDlAccounts().then(fillDlAccountSelect);
 }
 const dlSubTabs = document.querySelectorAll('#pane-delivery .db-tabs.sub .db-tab');
 if (dlSubTabs.length) dlSubTabs.forEach(b => b.addEventListener('click', () => subTabDelivery(b.dataset.tab)));
