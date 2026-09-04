@@ -2190,12 +2190,13 @@ $('dlAccAdd').addEventListener('click', async () => {
 
 // ---- добавление аккаунта Делливери по QR (как у Я.Еды) ----
 let dlQrTimer = null;
+let dlQrDone = false;
 function dlQrStopPoll() { if (dlQrTimer) { clearInterval(dlQrTimer); dlQrTimer = null; } }
 function dlQrSetStatus(html) { $('dlQrStatus').innerHTML = html; }
 
 $('dlQrStart').addEventListener('click', async () => {
   const btn = $('dlQrStart'); btn.disabled = true;
-  dlQrStopPoll();
+  dlQrStopPoll(); dlQrDone = false;
   try {
     const d = await api('/api/dl/qr/start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2208,7 +2209,6 @@ $('dlQrStart').addEventListener('click', async () => {
     $('dlQrLinkWrap').classList.remove('hidden');
     dlQrSetStatus('<span class="db-mut">Ожидание подтверждения в Яндекс-приложении…</span>');
     dlQrTimer = setInterval(dlQrPoll, 1500);
-    dlQrPoll();
   } catch (e) {
     dlQrSetStatus('<span style="color:var(--danger,#e5484d)">Ошибка: ' + esc(e.message) + '</span>');
   } finally {
@@ -2218,14 +2218,14 @@ $('dlQrStart').addEventListener('click', async () => {
 let dlQrId = null;
 
 async function dlQrPoll() {
-  if (!dlQrId) return;
+  if (!dlQrId || dlQrDone) return;
   try {
     const d = await api('/api/dl/qr/status/' + dlQrId);
     if (d.state === 'waiting') {
       dlQrSetStatus('<span class="db-mut">' + esc(d.hint ? 'Ожидание: ' + d.hint : 'Ожидание подтверждения…') + '</span>');
       return;
     }
-    dlQrStopPoll();
+    dlQrStopPoll(); dlQrDone = true;
     if (d.state === 'ok') {
       dlQrSetStatus('<span style="color:var(--ok,#16a34a)">✓ Аккаунт добавлен: ' + esc(d.account) + '</span>');
       loadDelivery();
@@ -2235,7 +2235,7 @@ async function dlQrPoll() {
       dlQrSetStatus('<span style="color:var(--danger,#e5484d)">' + esc(d.message || d.state) + '</span>');
     }
   } catch (e) {
-    dlQrStopPoll();
+    dlQrStopPoll(); dlQrDone = true;
     dlQrSetStatus('<span style="color:var(--danger,#e5484d)">Сеть: ' + esc(e.message) + '</span>');
   }
 }

@@ -768,6 +768,8 @@ def delivery_qr_status(qr_id):
         st = _dl_qr_load_state().get(qr_id)
     if not st:
         return {'state': 'error', 'message': 'сессия не найдена (сервер перезапущен?)'}
+    if st.get('done'):
+        return {'state': 'ok', 'account': st.get('account'), 'bearer': st.get('bearer')}
     if time.time() - st.get('created_at', 0) > _DL_QR_TTL:
         with _DL_QR_LOCK:
             state = _dl_qr_load_state()
@@ -849,7 +851,8 @@ def delivery_qr_status(qr_id):
         return {'state': 'error', 'message': f'сохранение аккаунта: {e}'}
     with _DL_QR_LOCK:
         state = _dl_qr_load_state()
-        state.pop(qr_id, None)
+        state[qr_id] = {'done': True, 'account': target.get('name'),
+                        'bearer': bearer[:20] + '…', 'created_at': st.get('created_at', time.time())}
         _dl_qr_save_state(state)
     return {'state': 'ok', 'account': target.get('name'), 'bearer': bearer[:20] + '…'}
 
