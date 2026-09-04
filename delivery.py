@@ -672,10 +672,30 @@ def _DEFAULT_COOKIE():
 # аккаунты Делливери (bearer-токен получается через exchange_sessionid).
 import threading as _threading
 
-_DL_QR_STATE = {}
 _DL_QR_LOCK = _threading.Lock()
 _DL_QR_TTL = 600
 _DL_PASSPORT_PWL = 'https://passport.yandex.ru/pwl-yandex'
+_DL_QR_FILE = os.path.join(core.DATA_DIR, 'delivery_qr_state.json')
+
+
+def _dl_qr_load_state():
+    return _read_json(_DL_QR_FILE)
+
+
+def _dl_qr_save_state(state):
+    _write_json_atomic(_DL_QR_FILE, state)
+
+
+def _dl_qr_cookies_to_dict(session):
+    return requests.utils.dict_from_cookiejar(session.cookies) if hasattr(requests, 'utils') else {c.name: c.value for c in session.cookies}
+
+
+def _dl_qr_rebuild_session(cookies_dict):
+    s = requests.Session()
+    if cookies_dict:
+        cj = requests.utils.cookiejar_from_dict(cookies_dict)
+        s.cookies.update(cj)
+    return s
 
 
 def _dl_qr_headers(csrf):
@@ -691,9 +711,10 @@ def _dl_qr_headers(csrf):
 def delivery_qr_start(account_name=''):
     """Создать QR-сессию входа Я.Еды/Делливери. Возвращает (qr_id, link).
 
-    Пользователь сканирует link Яндекс-приложением; при подтверждении
-    delivery_qr_status обменяет Session_id на OAuth-токен и сохранит
-    аккаунт Делливери.
+    Состояние (cookies + track_id + csrf) хранится в файле, поэтому
+    переживает перезапуски сервера/replic и multi-worker.
+    При подтверждении delivery_qr_status обменяет Session_id на OAuth-токен
+    и сохранит аккаунт Делливери.
     """
     s = requests.Session()
     try:
@@ -723,12 +744,16 @@ def delivery_qr_start(account_name=''):
     except requests.RequestException as e:
         raise RuntimeError(f'passport: сеть: {e}')
     qr_id = uuid.uuid4().hex
+    st = {
+        'cookies': _dl_qr_cookies_to_dict(s),
+        'csrf': csrf, 'magic_track_id': track_id,
+        'csrf_token': csrf_token, 'link': link, 'created_at': time.time(),
+        'account_name': (account_name or '').strip(),
+    }
     with _DL_QR_LOCK:
-        _DL_QR_STATE[qr_id] = {
-            'session': s, 'csrf': csrf, 'magic_track_id': track_id,
-            'csrf_token': csrf_token, 'link': link, 'created_at': time.time(),
-            'account_name': (account_name or '').strip(),
-        }
+        state = _dl_qr_load_state()
+        state[qr_id] = st
+        _dl_qr_save_state(state)
     return qr_id, link
 
 
@@ -740,19 +765,22 @@ def delivery_qr_status(qr_id):
     """
     import eda as _eda
     with _DL_QR_LOCK:
-        st = _DL_QR_STATE.get(qr_id)
+        st = _dl_qr_load_state().get(qr_id)
     if not st:
         return {'state': 'error', 'message': 'сессия не найдена (сервер перезапущен?)'}
-    if time.time() - st['created_at'] > _DL_QR_TTL:
+    if time.time() - st.get('created_at', 0) > _DL_QR_TTL:
         with _DL_QR_LOCK:
-            _DL_QR_STATE.pop(qr_id, None)
+            state = _dl_qr_load_state()
+            state.pop(qr_id, None)
+            _dl_qr_save_state(state)
         return {'state': 'expired', 'message': 'ссылка устарела — создайте новую'}
-    h = _dl_qr_headers(st['csrf'])
+    s = _dl_qr_rebuild_session(st.get('cookies') or {})
+    h = _dl_qr_headers(st.get('csrf', ''))
     try:
-        r = st['session'].post(_DL_PASSPORT_PWL + '/api/passport/auth/magic/code/status',
-                               headers=h, data=json.dumps({
-                                   'track_id': st['magic_track_id'], 'csrf_token': st['csrf_token'],
-                                   'yandexAllowedDomains': []}), timeout=25)
+        r = s.post(_DL_PASSPORT_PWL + '/api/passport/auth/magic/code/status',
+                   headers=h, data=json.dumps({
+                       'track_id': st.get('magic_track_id'), 'csrf_token': st.get('csrf_token'),
+                       'yandexAllowedDomains': []}), timeout=25)
         r.raise_for_status()
         d = r.json()
     except requests.RequestException as e:
@@ -768,12 +796,12 @@ def delivery_qr_status(qr_id):
     if not track_id:
         return {'state': 'error', 'message': f'нет trackId: {d}'}
     try:
-        r = st['session'].post(_DL_PASSPORT_PWL + '/api/passport/sessions/get_session',
-                               headers=h, data=json.dumps({'track_id': track_id}), timeout=25)
+        r = s.post(_DL_PASSPORT_PWL + '/api/passport/sessions/get_session',
+                   headers=h, data=json.dumps({'track_id': track_id}), timeout=25)
         r.raise_for_status()
     except requests.RequestException as e:
         return {'state': 'error', 'message': f'get_session: {e}'}
-    ck = {c.name: c.value for c in st['session'].cookies}
+    ck = {c.name: c.value for c in s.cookies}
     session_id = ck.get('Session_id') or ''
     if not session_id:
         return {'state': 'error', 'message': f'нет Session_id в cookies: {ck}'}
@@ -820,7 +848,9 @@ def delivery_qr_status(qr_id):
     except Exception as e:
         return {'state': 'error', 'message': f'сохранение аккаунта: {e}'}
     with _DL_QR_LOCK:
-        _DL_QR_STATE.pop(qr_id, None)
+        state = _dl_qr_load_state()
+        state.pop(qr_id, None)
+        _dl_qr_save_state(state)
     return {'state': 'ok', 'account': target.get('name'), 'bearer': bearer[:20] + '…'}
 
 

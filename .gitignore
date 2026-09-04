@@ -48,4 +48,5 @@ capture_*.py
 
 delivery_accounts.json
 delivery_sessions.json
+delivery_qr_state.json
 
