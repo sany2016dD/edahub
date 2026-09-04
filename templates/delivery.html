@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Делливери — доставка</title>
+<style>
+:root{
+  --green:#ffcc00; --green2:#ffd633;
+  --ink:#21201f; --ink2:#7a7773; --line:#e8e6e4;
+  --bg:#f6f6f4; --card:#fff; --red:#e32726;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;font-family:-apple-system,'Segoe UI',Roboto,sans-serif;color:var(--ink);background:#000}
+.phone{max-width:430px;margin:0 auto;min-height:100vh;background:var(--bg);position:relative;overflow:hidden}
+.hidden{display:none!important}
+.screen{display:none;padding-bottom:88px}
+.screen.active{display:block}
+.err{color:var(--red);font-size:14px;padding:12px;text-align:center}
+.hint{color:var(--ink2);font-size:14px;padding:24px;text-align:center}
+
+/* топбар */
+.header{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid var(--line)}
+.hbar{display:flex;align-items:center;gap:10px;padding:10px 14px}
+.hbar .logo{height:30px}
+.hbar .addr-btn{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:8px 12px;text-align:left;font-size:13px;color:var(--ink2);display:flex;flex-direction:column}
+.hbar .addr-btn b{color:var(--ink);font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}
+.hbar .icon-btn{width:38px;height:38px;border:none;background:#fff;border-radius:50%;font-size:18px;cursor:pointer}
+.hbar .icon-btn.on{background:var(--green)}
+.hbar .icon-btn{position:relative}
+.bdot{position:absolute;top:-2px;right:-4px;background:var(--red);color:#fff;border-radius:50%;font-size:10px;min-width:17px;height:17px;line-height:17px;text-align:center;font-weight:700;padding:0 3px}
+
+/* баннер зелёный */
+.hero{background:linear-gradient(180deg,#ffcc00,#ffdd55);padding:16px 18px;border-radius:0 0 22px 22px}
+.hero h1{margin:0;font-size:22px;font-weight:800}
+.hero p{margin:4px 0 0;font-size:13px;color:#5b5200}
+
+/* секции */
+section{margin:18px 14px 0}
+.sec-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.sec-head h2{margin:0;font-size:18px;font-weight:800}
+.sec-head a{color:var(--red);font-size:14px;text-decoration:none;font-weight:600}
+
+/* лента мест */
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.place{background:var(--card);border-radius:16px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.04)}
+.place .pimg{height:96px;background:#eef0ec;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.place .pimg img{width:100%;height:100%;object-fit:cover}
+.place .pinfo{padding:10px}
+.place .pname{font-size:13px;font-weight:700;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:32px}
+.place .peta{font-size:12px;color:var(--ink2);margin-top:4px}
+.place .peta i{font-style:normal;margin-right:2px}
+.place .pbadge{display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px;margin-top:6px;background:#fff2da;color:#b47200}
+
+/* меню */
+.shophead{position:sticky;top:0;z-index:15;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;padding:10px 14px}
+.shophead .back{font-size:26px;line-height:1;border:none;background:none;cursor:pointer;color:var(--ink);padding:0;width:30px}
+.shophead .st-info{flex:1;min-width:0}
+.shophead .st-name{font-size:16px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shophead .st-sub{font-size:12px;color:var(--ink2)}
+.shophead .st-icon{width:40px;height:40px;border-radius:12px;object-fit:cover;background:#eef0ec}
+.cats-nav{position:sticky;top:57px;z-index:12;background:#fff;display:flex;gap:8px;overflow-x:auto;padding:10px 14px;border-bottom:1px solid var(--line)}
+.cat-chip{flex:0 0 auto;padding:8px 14px;border-radius:20px;background:var(--bg);border:none;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;white-space:nowrap}
+.cat-chip.on{background:var(--ink);color:#fff}
+.cat-block{padding:0 14px;margin-top:16px}
+.cat-title{font-size:16px;font-weight:800;margin:0 0 10px;padding-top:6px}
+.goods{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.good{background:var(--card);border-radius:16px;overflow:hidden}
+.good .gimg{position:relative;aspect-ratio:1/1;background:#eef0ec}
+.good .gimg img{width:100%;height:100%;object-fit:cover}
+.good .addbtn{position:absolute;right:10px;bottom:10px;width:34px;height:34px;border-radius:50%;border:none;background:#fff;color:var(--red);font-size:22px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.15);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.good .gbody{padding:10px}
+.good .gname{font-size:13px;font-weight:700;line-height:1.25;min-height:32px}
+.good .gweight{font-size:11px;color:var(--ink2);margin-top:2px}
+.good .gprice{display:flex;align-items:baseline;gap:6px;margin-top:6px;font-weight:800;font-size:14px}
+.good .gprice s{color:var(--ink2);font-weight:500;font-size:12px}
+.good .gpromo{color:var(--red);font-size:11px;font-weight:600}
+.good.g-unav{opacity:.55}
+
+/* корзина */
+.page{padding:14px}
+.vhead{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.vhead .back{font-size:26px;border:none;background:none;cursor:pointer;color:var(--ink);padding:0;width:30px}
+.vhead h2{margin:0;font-size:19px;font-weight:800}
+.cart-rows{background:var(--card);border-radius:16px;padding:6px 14px}
+.crow{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.crow:last-child{border-bottom:none}
+.crow img{width:56px;height:56px;border-radius:12px;object-fit:cover;background:#eef0ec}
+.crow .cname{font-size:14px;font-weight:700;line-height:1.2}
+.crow .cprice{font-size:13px;color:var(--ink2);margin-top:2px}
+.crow .cprice b{color:var(--red)}
+.crow .ctype{flex:1;min-width:0}
+.qty{display:flex;align-items:center;gap:10px}
+.qty button{width:30px;height:30px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:18px;cursor:pointer;color:var(--ink);line-height:1}
+.qty span{min-width:20px;text-align:center;font-weight:700;font-size:15px}
+.sum-card{background:#fff;border-radius:16px;padding:14px;margin-top:14px}
+.sum-row{display:flex;justify-content:space-between;font-size:14px;padding:5px 0;color:var(--ink2)}
+.sum-row b{color:var(--ink);font-weight:700}
+.sum-row.total{font-size:17px;font-weight:800;color:var(--ink);border-top:1px solid var(--line);margin-top:6px;padding-top:10px}
+.promo-input{display:flex;gap:8px;margin-top:10px}
+.promo-input input{flex:1;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:14px}
+.promo-input button{border:none;border-radius:12px;padding:10px 16px;font-weight:700;cursor:pointer;background:var(--ink);color:#fff;font-size:13px}
+.promo-drop{background:#eef7ec;color:#1d7b3f;border-radius:12px;padding:10px 12px;margin-top:10px;font-size:13px;font-weight:600}
+.btn-main{width:100%;border:none;border-radius:16px;background:var(--red);color:#fff;font-size:16px;font-weight:800;padding:16px;cursor:pointer;margin-top:16px}
+.btn-main:disabled{background:#d9d6d2;color:#9a9691}
+.btn-sec{width:100%;border:1.5px solid var(--line);border-radius:16px;background:#fff;color:var(--ink);font-size:15px;font-weight:700;padding:14px;cursor:pointer;margin-top:10px}
+
+/* адрес */
+.field{margin-top:10px}
+.field label{display:block;font-size:12px;color:var(--ink2);margin-bottom:5px;font-weight:600}
+.field input,.field textarea{width:100%;border:1px solid var(--line);border-radius:12px;padding:11px 12px;font-size:14px;font-family:inherit}
+.fields2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* оплата */
+.pay-card{display:flex;align-items:center;gap:12px;border:1.5px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px;cursor:pointer}
+.pay-card.on{border-color:var(--red);background:#fff7f6}
+.pay-card .py{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.pay-card .pd{flex:1}
+.pay-card .pd b{font-size:14px;display:block}
+.pay-card .pd span{font-size:12px;color:var(--ink2)}
+.pay-card .sum{font-weight:800;font-size:14px}
+
+/* QR / оплата */
+.qr-wrap{text-align:center;padding:24px 16px;background:#fff;border-radius:18px;margin-top:14px}
+.qr-wrap svg,.qr-wrap canvas{width:220px;height:220px;display:block;margin:0 auto 14px}
+.qr-amount{font-size:26px;font-weight:800}
+.qr-hint{color:var(--ink2);font-size:13px;margin-top:8px;line-height:1.5}
+.bank-chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.bank-chip{border:1px solid var(--line);background:#fff;border-radius:20px;padding:8px 12px;font-size:12px;font-weight:600;cursor:pointer}
+
+/* нижняя навигация */
+.bottom{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;z-index:30;background:#fff;border-top:1px solid var(--line);display:flex}
+.bottom .b{flex:1;border:none;background:none;padding:9px 0;font-size:11px;color:var(--ink2);cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px}
+.bottom .b .bi{font-size:21px;line-height:1}
+.bottom .b.active{color:var(--red);font-weight:700}
+.bottom .b .bdot{position:absolute}
+/* плавающая корзина в магазине */
+.float-cart{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;z-index:25;padding:12px 14px 92px}
+.float-cart button{width:100%;border:none;border-radius:16px;background:var(--red);color:#fff;font-size:15px;font-weight:800;padding:15px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;box-shadow:0 4px 16px rgba(0,0,0,.15)}
+.float-cart.hidden{display:none}
+.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#fff;padding:11px 18px;border-radius:12px;font-size:14px;z-index:60;max-width:90%}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div id="invalid" class="hidden"><div class="err">Ссылка недействительна, истекла или отозвана.</div></div>
+
+  <!-- ============ ГЛАВНАЯ ============ -->
+  <div class="screen active" id="home">
+    <div class="header">
+      <div class="hbar">
+        <button class="addr-btn" onclick="openAddress()">
+          <span>Адрес доставки</span>
+          <b id="addrCity">Загрузка…</b>
+        </button>
+        <button class="icon-btn" onclick="openCart()"><span class="bi" style="font-size:20px">🛒</span><span class="bdot" id="cartDot" style="display:none"></span></button>
+      </div>
+    </div>
+    <div class="hero">
+      <h1 id="greet">Делливери</h1>
+      <p id="greetSub">Доставим еду и продукты</p>
+    </div>
+    <section>
+      <div class="sec-head"><h2>Магазины</h2><span style="font-size:12px;color:var(--ink2)">доставка продуктов</span></div>
+      <div id="placesGrid" class="grid"><div class="hint" style="grid-column:1/-1">Загрузка…</div></div>
+    </section>
+    <nav class="bottom">
+      <button class="b active"><span class="bi">🏠</span>Главная</button>
+      <button class="b" onclick="openCart()"><span class="bi">🛒</span>Корзина<span class="bdot" id="cartDot2" style="display:none"></span></button>
+    </nav>
+  </div>
+
+  <!-- ============ МАГАЗИН / МЕНЮ ============ -->
+  <div class="screen" id="shop">
+    <div class="shophead">
+      <button class="back" onclick="showView('home')">‹</button>
+      <img class="st-icon" id="shopIcon" src="" onerror="this.style.visibility='hidden'">
+      <div class="st-info">
+        <div class="st-name" id="shopName"></div>
+        <div class="st-sub" id="shopSub"></div>
+      </div>
+    </div>
+    <div class="cats-nav" id="catsNav"></div>
+    <div id="menuBox"><div class="hint">Загрузка…</div></div>
+    <div class="float-cart hidden" id="floatCart"><button onclick="openCart()"><span id="floatCartText">Корзина</span><span id="floatCartSum"></span></button></div>
+  </div>
+
+  <!-- ============ КОРЗИНА ============ -->
+  <div class="screen" id="cart">
+    <div class="page">
+      <div class="vhead"><button class="back" onclick="goBackFromCart()">‹</button><h2>Корзина</h2></div>
+      <div id="cartBox"><div class="hint">Загрузка…</div></div>
+    </div>
+  </div>
+
+  <!-- ============ АДРЕС ============ -->
+  <div class="screen" id="address">
+    <div class="page">
+      <div class="vhead"><button class="back" onclick="closeAddress()">‹</button><h2>Адрес доставки</h2></div>
+      <div class="field"><label>Город</label><input id="aCity" placeholder="Омск"></div>
+      <div class="fields2">
+        <div class="field"><label>Улица</label><input id="aStreet" placeholder="проспект Мира"></div>
+        <div class="field"><label>Дом</label><input id="aHouse" placeholder="33"></div>
+      </div>
+      <div class="fields2">
+        <div class="field"><label>Подъезд</label><input id="aEntry" placeholder=""></div>
+        <div class="field"><label>Этаж</label><input id="aFloor" placeholder=""></div>
+      </div>
+      <div class="fields2">
+        <div class="field"><label>Квартира/офис</label><input id="aFlat" placeholder=""></div>
+        <div class="field"><label>Домофон</label><input id="aDoor" placeholder=""></div>
+      </div>
+      <div class="field"><label>Комментарий курьеру</label><textarea id="aComment" rows="2" placeholder=""></textarea></div>
+      <button class="btn-main" onclick="saveAddress()">Доставка сюда</button>
+    </div>
+  </div>
+
+  <!-- ============ ОФОРМЛЕНИЕ ============ -->
+  <div class="screen" id="checkout">
+    <div class="page">
+      <div class="vhead"><button class="back" onclick="openCart()">‹</button><h2>Оформление</h2></div>
+      <div id="checkoutBox"><div class="hint">Загрузка…</div></div>
+    </div>
+  </div>
+
+  <!-- ============ ОПЛАТА SBP ============ -->
+  <div class="screen" id="pay">
+    <div class="page">
+      <div class="vhead"><h2>Оплата</h2></div>
+      <div id="payBox"><div class="hint">Загрузка…</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const TOKEN = "{{ token if token else '' }}";
+const INVALID = {{ 'true' if invalid else 'false' }};
+const $ = id => document.getElementById(id);
+
+const state = {
+  places: [], shopSlug: null, shopName: '',
+  cats: [], cart: null, address: null, cartUid: null,
+  orderNr: null, offers: [],
+  lastCartItemId: null,
+};
+
+if (INVALID) {
+  $('invalid').classList.remove('hidden');
+  $('home').classList.remove('active');
+}
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function money(v){return Number(v||0).toLocaleString('ru-RU',{style:'currency',currency:'RUB'});}
+function showView(name){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));$(name).classList.add('active');window.scrollTo(0,0);}
+function toast(m){let t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2600);}
+
+async function api(url,opts){
+  const r=await fetch(url,Object.assign({},opts,{headers:Object.assign({'Content-Type':'application/json'},(opts||{}).headers)}));
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.error||('HTTP '+r.status));
+  return d;
+}
+
+function imgFix(u){return u? String(u).replace(/{w}x{h}/g,'200x200'):'';}
+
+// ---------- ГЛАВНАЯ ----------
+async function loadHome(){
+  try{
+    const info=await api(`/api/dl/${TOKEN}/info`);
+    state.address = info.addr || null;
+    $('addrCity').textContent = (info.addr&&(info.addr.full_text||info.addr.street)) || 'Укажите адрес';
+    const d=await api(`/api/dl/${TOKEN}/layout`);
+    state.places=d.places||[];
+    renderPlaces();
+    loadCartBadge();
+  }catch(e){ $('placesGrid').innerHTML=`<div class="err">${esc(e.message)}</div>`; }
+}
+function renderPlaces(){
+  const g=$('placesGrid');
+  if(!state.places.length){g.innerHTML='<div class="hint">Нет доступных мест</div>';return;}
+  g.innerHTML=state.places.map((p,i)=>`
+    <div class="place" onclick="openShop('${esc(p.slug)}','${esc(p.name)}')">
+      <div class="pimg">${p.logo?`<img src="${esc(imgFix(p.logo))}" onerror="this.style.visibility='hidden'">`:'<span style="font-size:30px">🍽</span>'}</div>
+      <div class="pinfo">
+        <div class="pname">${esc(p.name||'Место')}</div>
+        <div class="peta">${p.eta?`<i>⏱</i> ${esc(p.eta)}`:''}</div>
+        ${p.business?`<span class="pbadge">${esc(p.business==='shop'?'Магазин':'Ресторан')}</span>`:''}
+      </div>
+    </div>`).join('');
+}
+
+function openShop(slug,name){
+  state.shopSlug=slug; state.shopName=name||slug;
+  $('shopName').textContent=name||slug;
+  $('shopIcon').src='';
+  $('shopSub').textContent='';
+  showView('shop');
+  loadShop();
+}
+async function loadShop(){
+  $('menuBox').innerHTML='<div class="hint">Загрузка…</div>';
+  $('catsNav').innerHTML='';
+  try{
+    const s=await api(`/api/dl/${TOKEN}/shop/${state.shopSlug}`);
+    if (s.name && s.name !== state.shopSlug) $('shopName').textContent = s.name;
+    if (s.logo)$('shopIcon').src=imgFix(s.logo);
+    let sub=(s.eta?esc(s.eta):'')+(s.rating?(' · '+esc(s.rating)):'');
+    $('shopSub').textContent=sub;
+    const m=await api(`/api/dl/${TOKEN}/menu/${state.shopSlug}`);
+    state.cats=m.categories||[];
+    renderCatsNav();
+    renderMenu();
+    loadCartBadge();
+  }catch(e){$('menuBox').innerHTML=`<div class="err">${esc(e.message)}</div>`;}
+}
+function renderCatsNav(){
+  const n=$('catsNav');
+  n.innerHTML=state.cats.map((c,i)=>`<button class="cat-chip ${i===0?'on':''}" onclick="goCat(${i})">${esc(c.name||'Категория')}</button>`).join('');
+}
+function goCat(i){
+  document.querySelectorAll('.cat-chip').forEach((c,ci)=>c.classList.toggle('on',ci===i));
+  const el=$('menuBox');
+  window.scrollTo(0,0);
+  const c=state.cats[i];
+  $('catsNav').scrollIntoView({behavior:'smooth',block:'start'});
+  renderMenuBlock(c,el);
+}
+function renderMenu(){
+  const box=$('menuBox');
+  box.innerHTML='';
+  state.cats.forEach(c=>renderMenuBlock(c,box));
+  // привязка чипов к прокрутке
+}
+function renderMenuBlock(c,box){
+  const items=(c.items||[]).filter(it=>true);
+  if(!items.length)return;
+  const div=document.createElement('div');
+  div.className='cat-block';
+  div.innerHTML=`<h3 class="cat-title">${esc(c.name||'Категория')}</h3><div class="goods">${
+    items.map(it=>{
+      const dis=it.available===false?' g-unav':'';
+      return `<div class="good${dis}">
+        <div class="gimg">${it.image?`<img src="${esc(imgFix(it.image))}" onerror="this.style.visibility='hidden'">`:'<span style="font-size:34px;display:flex;height:100%;align-items:center;justify-content:center">🛒</span>'}
+          <button class="addbtn" ${it.available===false?'disabled':''} onclick="addItem('${esc(it.uid)}')">+</button>
+        </div>
+        <div class="gbody">
+          <div class="gname">${esc(it.name||'')}</div>
+          <div class="gweight">${it.weight?esc(it.weight):(it.rating?esc(it.rating):'')}</div>
+          <div class="gprice">
+            ${it.promo_price?`<s>${money(it.price)}</s><span>${money(it.promo_price)}</span>`:`<span>${money(it.price)}</span>`}
+          </div>
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+  box.appendChild(div);
+}
+
+async function addItem(uid){
+  try{
+    const d=await api(`/api/dl/${TOKEN}/cart/add`,{method:'POST',body:JSON.stringify({slug:state.shopSlug,item_id:uid,quantity:1})});
+    state.cartUid=d.cart_uuid;
+    loadCartBadge();
+    toast('Добавлено');
+  }catch(e){toast(e.message);}
+}
+async function loadCartBadge(){
+  try{
+    const d=await api(`/api/dl/${TOKEN}/cart${state.shopSlug?('?slug='+encodeURIComponent(state.shopSlug)):''}`);
+    state.cart=d.cart;
+    const n=(state.cart&&state.cart.items&&state.cart.items.reduce((a,i)=>a+(i.quantity||0),0))||0;
+    const sum=state.cart?Number(state.cart.total||0):0;
+    const fc=$('floatCart');
+    if(state.shopSlug && n){
+      fc.classList.remove('hidden');
+      $('floatCartText').textContent=`Корзина · ${n}`;
+      $('floatCartSum').textContent=money(sum);
+    } else fc.classList.add('hidden');
+    const cd=$('cartDot'), cd2=$('cartDot2');
+    if(n){ cd.textContent=n; cd.classList.remove('hidden'); if(cd2){cd2.textContent=n; cd2.classList.remove('hidden');} }
+    else { cd.classList.add('hidden'); if(cd2)cd2.classList.add('hidden'); }
+  }catch(e){}
+}
+function openCart(){ showView('cart'); loadCartBox(); }
+function goBackFromCart(){ if(state.shopSlug) showView('shop'); else showView('home'); }
+async function loadCartBox(){
+  const box=$('cartBox');
+  box.innerHTML='<div class="hint">Загрузка…</div>';
+  try{
+    const d=await api(`/api/dl/${TOKEN}/cart${state.shopSlug?('?slug='+encodeURIComponent(state.shopSlug)):''}`);
+    state.cart=d.cart;
+    state.cartUid=state.cart&&state.cart.id;
+    renderCart();
+  }catch(e){box.innerHTML=`<div class="err">${esc(e.message)}</div>`;}
+}
+function renderCart(){
+  const box=$('cartBox');
+  const items=(state.cart&&state.cart.items)||[];
+  if(!items.length){box.innerHTML='<div class="hint">Корзина пуста</div><div class="promo-input"><button class="btn-sec" onclick="goBackFromCart()">За покупками</button></div>';return;}
+  box.innerHTML=`
+    <div class="cart-rows">${items.map(it=>`
+      <div class="crow">
+        ${it.image?`<img src="${esc(imgFix(it.image))}" onerror="this.style.visibility='hidden'">`:''}
+        <div class="ctype">
+          <div class="cname">${esc(it.name||'')}</div>
+          <div class="cprice">${it.promo_price?esc(money(it.promo_price)):esc(money(it.price))} ${it.quantity>1?('× '+it.quantity):''}</div>
+        </div>
+        <div class="qty">
+          <button onclick="setQty(${it.id},${esc(it.item_uid)},${(it.quantity||1)-1})">−</button>
+          <span>${it.quantity}</span>
+          <button onclick="setQty(${it.id},${esc(it.item_uid)},${(it.quantity||1)+1})">+</button>
+        </div>
+      </div>`).join('')}</div>
+    <div class="sum-card">
+      <div class="sum-row"><span>Товары</span><b>${money(state.cart.subtotal)}</b></div>
+      ${(Number(state.cart.discount)||0)?`<div class="sum-row"><span>Скидка</span><b>−${money(state.cart.discount)}</b></div>`:''}
+      <div class="promo-input">
+        <input id="promoCode" placeholder="Промокод">
+        <button onclick="applyPromo()">Ок</button>
+      </div>
+      <div id="promoMsg"></div>
+      <div class="sum-row total"><span>Итого</span><b>${money(state.cart.total)}</b></div>
+    </div>
+    <button class="btn-main" onclick="openCheckout()">Оформить заказ</button>`;
+}
+async function setQty(cartItemId,itemUid,qty){
+  try{
+    await api(`/api/dl/${TOKEN}/cart/qty`,{method:'POST',body:JSON.stringify({slug:state.shopSlug,cart_item_id:cartItemId,item_id:itemUid,quantity:qty})});
+    loadCartBox(); loadCartBadge();
+  }catch(e){toast(e.message);}
+}
+async function applyPromo(){
+  const code=$('promoCode').value.trim();
+  if(!code){toast('Введите промокод');return;}
+  try{
+    await api(`/api/dl/${TOKEN}/promocode`,{method:'POST',body:JSON.stringify({code:code,slug:state.shopSlug})});
+    $('promoMsg').innerHTML=`<div class="promo-drop">Промокод ${esc(code.toUpperCase())} применён</div>`;
+    loadCartBox();
+  }catch(e){$('promoMsg').innerHTML=`<div class="err">${esc(e.message)}</div>`;}
+}
+
+// ---------- АДРЕС ----------
+function openAddress(){ showView('address'); if(state.address){ fillAddr(state.address); } }
+function fillAddr(a){ $('aCity').value=a.city||'';$('aStreet').value=a.street||'';$('aHouse').value=a.house||''; $('aEntry').value=(a.details&&a.details.find(d=>d.type==='entrance')||{}).text||a.entrance||''; $('aFloor').value=(a.details&&a.details.find(d=>d.type==='floor')||{}).text||a.floor||''; $('aFlat').value=(a.details&&a.details.find(d=>d.type==='office')||{}).text||a.office||''; $('aDoor').value=(a.details&&a.details.find(d=>d.type==='doorcode')||{}).text||a.doorcode||''; $('aComment').value=a.comment||''; }
+function saveAddress(){
+  const a={
+    city:$('aCity').value.trim()||'Омск', street:$('aStreet').value.trim(), house:$('aHouse').value.trim(),
+    entrance:$('aEntry').value.trim(), floor:$('aFloor').value.trim(), office:$('aFlat').value.trim(),
+    doorcode:$('aDoor').value.trim(), comment:$('aComment').value.trim(),
+  };
+  if(!a.street){toast('Укажите улицу');return;}
+  a.full_text=`${a.city}, ${a.street}, ${a.house}`;
+  a.areas=[]; a.country='Россия';
+  state.address=a;
+  $('addrCity').textContent=a.full_text;
+  closeAddress();
+  toast('Адрес сохранён');
+}
+function closeAddress(){ if(state.shopSlug&&!state.loadingCheckout) showView('shop'); else showView('home'); }
+
+// ---------- ОФОРМЛЕНИЕ ----------
+async function openCheckout(){
+  if(!state.address || !state.address.street){ toast('Сначала выберите адрес'); openAddress(); return; }
+  showView('checkout');
+  $('checkoutBox').innerHTML='<div class="hint">Загрузка…</div>';
+  try{
+    const slug=state.shopSlug||(state.cart&&state.cart.place_slug)||'';
+    const d=await api(`/api/dl/${TOKEN}/checkout`,{method:'POST',body:JSON.stringify({address:state.address,place_slug:slug,payment_id:'card'})});
+    state.offers=d.offers||[];
+    renderCheckout(d.bdu);
+  }catch(e){$('checkoutBox').innerHTML=`<div class="err">${esc(e.message)}</div>`;}
+}
+function renderCheckout(bdu){
+  const box=$('checkoutBox');
+  const addrTxt= state.address ? [state.address.city,state.address.street,state.address.house].filter(Boolean).join(', ') : '';
+  const pays=(state.offers&&state.offers.length)?state.offers.map((o,i)=>`
+    <div class="pay-card ${i===0?'on':''}" onclick="pickPay(${i})">
+      <div class="py" style="background:${i===0?'var(--green)':'#eef0ec'}">${i===0?'💳':'💵'}</div>
+      <div class="pd"><b>${esc(o.cost?money(o.cost):'Оплата')}</b><span>${esc(o.title||'')}${o.service_fee?(' · сервис '+money(o.service_fee)):''}</span></div>
+      <div class="sum">${money(o.cost)}</div>
+    </div>`).join(''):'<div class="hint">Способы оплаты недоступны</div>';
+  box.innerHTML=`
+    <div class="sum-card">
+      <div class="sum-row"><span>Адрес</span><b style="text-align:right;max-width:60%">${esc(addrTxt)}</b></div>
+      <div class="sum-row"><span>Итого</span><b>${money(state.cart?state.cart.total:0)}</b></div>
+    </div>
+    <div style="margin-top:16px">
+      <div class="vhead"><h2 style="font-size:16px">Способ оплаты</h2></div>
+      ${pays}
+    </div>
+    <div class="field"><label>Телефон</label><input id="oPhone" type="tel" placeholder="+7..."></div>
+    <button class="btn-main" onclick="submitOrder()">Оплатить заказ</button>`;
+  $('checkoutBox').dataset.pay=0;
+}
+function pickPay(i){ document.querySelectorAll('.pay-card').forEach((c,ci)=>c.classList.toggle('on',ci===i)); $('checkoutBox').dataset.pay=i; }
+async function submitOrder(){
+  const i=parseInt($('checkoutBox').dataset.pay||0);
+  const offer=state.offers[i]||{};
+  const phone=$('oPhone').value.trim()||'+79372537435';
+  // Демо-флоу до go-checkout: реальный заказ НЕ создаётся,
+  // показываем экран оплаты СБП по данным выбранного оффера.
+  showPay(offer, phone);
+}
+
+const SBP_QR_ID='AD1P101D30QGDMBS8T0PSDT9K0TSAJE2';
+const SBP_QR_URL='https://qr.nspk.ru/'+SBP_QR_ID;
+
+// ---------- ОПЛАТА SBP (демо, на данных checkout-offers) ----------
+async function showPay(offer, phone){
+  showView('pay');
+  const box=$('payBox');
+  const amount = offer.cost || (state.cart ? state.cart.total : 0);
+  const sbp = String(offer.title||'').indexOf('СБП')===0 || String(offer.payment_id||'').indexOf('sbp')===0;
+  box.innerHTML=`
+    <div class="sum-card">
+      <div class="sum-row"><span>Способ</span><b>${esc(offer.title||'СБП')}</b></div>
+      <div class="sum-row"><span>Сумма</span><b>${money(amount)}</b></div>
+      ${phone?`<div class="sum-row"><span>Телефон</span><b>${esc(phone)}</b></div>`:''}
+    </div>
+    <div class="qr-wrap">
+      <div class="qr-amount">${money(amount)}</div>
+      <div class="qr-hint">${sbp?'Отсканируйте QR-код в приложении банка или СБП':'Оплата будет списана с выбранной карты'}</div>
+      <canvas id="qrCanvas" style="${sbp?'':'display:none'}"></canvas>
+      ${sbp?`<div class="qr-hint">${esc(SBP_QR_URL)}</div>`:''}
+      ${sbp?`<div class="bank-chips">
+        <a class="bank-chip" target="_blank" href="https://www.tbank.ru/mybank/payments/qr-pay/${SBP_QR_ID}">Т-Банк</a>
+        <a class="bank-chip" target="_blank" href="https://online.vneshtbank.ru/i/paymentSbp/${SBP_QR_ID}">ВТБ</a>
+        <a class="bank-chip" target="_blank" href="https://sbpgpb.ru/c2bpayments/${SBP_QR_ID}">Газпромбанк</a>
+        <a class="bank-chip" target="_blank" href="https://payzonaecom.com/mobile-public/goto/qr/${SBP_QR_ID}">Сбер</a>
+        <a class="bank-chip" target="_blank" href="https://online.raiffeisen.ru/outer/qr/qr.nspk.ru/${SBP_QR_ID}">Райффайзен</a>
+      </div>`:''}
+    </div>
+    <button class="btn-sec" onclick="backToHome()">На главную</button>`;
+  if (sbp) renderQr(SBP_QR_URL, amount);
+}
+function backToHome(){ state.shopSlug=''; showView('home'); }
+function renderQr(text,amount){
+  const c=$('qrCanvas'); if(!c)return;
+  c.width=220;c.height=220;
+  if(window.qrcode){ try{ window.qrcode(c,{text:text,width:220,height:220}); }catch(e){} }
+}
+function loadQrLib(){
+  if(!window.qrcode&&!window.__qrLoaded){ window.__qrLoaded=true; const s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js'; s.onload=()=>{}; document.head.appendChild(s);} }
+
+// ---------- init ----------
+if(!INVALID){
+  loadHome();
+  loadQrLib();
+}
+</script>
+</body>
+</html>

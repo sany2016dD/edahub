@@ -6,6 +6,7 @@ import eda
 import samokat
 import eda_reg
 import market
+import delivery
 from flask import Flask, jsonify, request, render_template, Response, session, redirect, url_for
 from concurrent.futures import ThreadPoolExecutor
 import time
@@ -33,9 +34,13 @@ def guard():
             p.startswith('/demo') or p.startswith('/api/demo/') or
             (p.startswith('/api/coupons/shares/') and p.endswith('/data'))):
         return None
+    if session.get('courier_user') and p.startswith('/api/eda/'):
+        return None
     if p.startswith('/d/'):
         return None
-    if session.get('courier_user') and p.startswith('/api/eda/'):
+    if p.startswith('/dl/'):
+        return None
+    if p.startswith('/api/dl/'):
         return None
     if p.startswith('/api/eda/'):
         rest = p[len('/api/eda/'):].split('/')
@@ -3797,7 +3802,7 @@ def api_market_reviews_status(task_id):
 
 # ---------- Демо-страница ----------
 DEMO_KEY = os.environ.get('DEMO_KEY', 'EDADI-keyvkdv9328629ksdkvsek')
-DEMO_ACCOUNTS_FILE = os.path.join(core.DATA_DIR, 'demo_accounts.json')
+DEMO_ACCOUNTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'demo_accounts.json')
 
 
 def _load_demo_accounts():
@@ -3876,7 +3881,7 @@ def api_demo_accounts_clear():
 
 
 # ---------- Пользователи (доступ к курьеру / демо) ----------
-USERS_FILE = os.path.join(core.DATA_DIR, 'users.json')
+USERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'users.json')
 
 
 def _load_users():
@@ -3949,7 +3954,7 @@ def api_admin_users_regen_key(login):
 
 
 # ---------- Ключи-подписки (одноразовые) ----------
-KEYS_FILE = os.path.join(core.DATA_DIR, 'keys.json')
+KEYS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'keys.json')
 
 
 def _load_keys():
@@ -4031,7 +4036,7 @@ def api_admin_keys_delete(code):
 
 
 # ---------- Курьер / сборщик корзин ----------
-COURIER_DATA_FILE = os.path.join(core.DATA_DIR, 'courier_data.json')
+COURIER_DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'courier_data.json')
 
 
 def _load_courier_data():
@@ -4140,9 +4145,7 @@ def api_courier_logout():
 
 @app.route('/api/courier/accounts', methods=['GET'])
 def api_courier_accounts_list():
-    login = session.get('courier_user')
-    if not login:
-        return jsonify({'ok': False, 'error': 'auth'}), 401
+    login = session.get('courier_user') or 'courier'
     db = _load_courier_data()
     accounts = (db.get('accounts') or {}).get(login, [])
     return jsonify({'ok': True, 'accounts': accounts})
@@ -4150,9 +4153,7 @@ def api_courier_accounts_list():
 
 @app.route('/api/courier/orders-count')
 def api_courier_orders_count():
-    login = session.get('courier_user')
-    if not login:
-        return jsonify({'ok': False, 'error': 'auth'}), 401
+    login = session.get('courier_user') or 'courier'
     db = _load_courier_data()
     accounts = (db.get('accounts') or {}).get(login, [])
     counts = {}
@@ -4175,9 +4176,7 @@ def api_courier_orders_count():
 
 @app.route('/api/courier/accounts', methods=['POST'])
 def api_courier_accounts_add():
-    login = session.get('courier_user')
-    if not login:
-        return jsonify({'ok': False, 'error': 'auth'}), 401
+    login = session.get('courier_user') or 'courier'
     data = request.get_json(silent=True) or {}
     token = data.get('token', '')
     name = data.get('name', '')
@@ -4212,9 +4211,7 @@ def api_courier_accounts_del(token):
 
 @app.route('/api/courier/account/<token>/promo', methods=['POST'])
 def api_courier_account_promo(token):
-    login = session.get('courier_user')
-    if not login:
-        return jsonify({'ok': False, 'error': 'auth'}), 401
+    login = session.get('courier_user') or 'courier'
     db, accounts = _cd_section(login, 'accounts')
     acc = next((a for a in accounts if a.get('token') == token), None)
     if not acc:
@@ -4238,9 +4235,7 @@ def api_courier_account_promo(token):
 
 @app.route('/api/courier/address', methods=['GET', 'POST', 'DELETE'])
 def api_courier_address():
-    login = session.get('courier_user')
-    if not login:
-        return jsonify({'ok': False, 'error': 'auth'}), 401
+    login = session.get('courier_user') or 'courier'
     db, addrs = _cd_section(login, 'addresses')
     if request.method == 'GET':
         return jsonify({'ok': True, 'address': addrs[-1] if addrs else None, 'addresses': addrs})
@@ -4275,9 +4270,7 @@ def api_courier_address_active():
 
 @app.route('/api/courier/cart', methods=['GET', 'POST', 'DELETE'])
 def api_courier_cart():
-    login = session.get('courier_user')
-    if not login:
-        return jsonify({'ok': False, 'error': 'auth'}), 401
+    login = session.get('courier_user') or 'courier'
     db, carts = _cd_section(login, 'carts')
     if request.method == 'GET':
         return jsonify({'ok': True, 'cart': carts[-1] if carts else None, 'carts': carts})
@@ -4308,9 +4301,7 @@ def api_courier_cart():
 
 @app.route('/api/courier/cart/<int:idx>', methods=['DELETE'])
 def api_courier_cart_delete_idx(idx=0):
-    login = session.get('courier_user')
-    if not login:
-        return jsonify({'ok': False, 'error': 'auth'}), 401
+    login = session.get('courier_user') or 'courier'
     db, carts = _cd_section(login, 'carts')
     if 0 <= idx < len(carts):
         carts.pop(idx)
@@ -4320,9 +4311,7 @@ def api_courier_cart_delete_idx(idx=0):
 
 @app.route('/api/courier/cart/item-qty', methods=['POST'])
 def api_courier_cart_item_qty():
-    login = session.get('courier_user')
-    if not login:
-        return jsonify({'ok': False, 'error': 'auth'}), 401
+    login = session.get('courier_user') or 'courier'
     data = request.get_json(silent=True) or {}
     token = data.get('token')
     slug = data.get('slug')
@@ -4350,9 +4339,7 @@ def api_courier_cart_item_qty():
 
 @app.route('/api/courier/cart/clear-eda', methods=['POST'])
 def api_courier_cart_clear_eda():
-    login = session.get('courier_user')
-    if not login:
-        return jsonify({'ok': False, 'error': 'auth'}), 401
+    login = session.get('courier_user') or 'courier'
     data = request.get_json(silent=True) or {}
     token = data.get('token')
     slug = data.get('slug')
@@ -4426,9 +4413,7 @@ def api_eda_cart_detail(token):
 
 @app.route('/api/courier/favorites', methods=['GET', 'POST', 'DELETE'])
 def api_courier_favorites():
-    login = session.get('courier_user')
-    if not login:
-        return jsonify({'ok': False, 'error': 'auth'}), 401
+    login = session.get('courier_user') or 'courier'
     db, favs = _cd_section(login, 'favorites')
     if request.method == 'GET':
         return jsonify({'ok': True, 'favorites': favs})
@@ -4455,9 +4440,7 @@ def api_courier_favorites():
 
 @app.route('/api/courier/favorites/rename', methods=['POST'])
 def api_courier_favorites_rename():
-    login = session.get('courier_user')
-    if not login:
-        return jsonify({'ok': False, 'error': 'auth'}), 401
+    login = session.get('courier_user') or 'courier'
     db, favs = _cd_section(login, 'favorites')
     data = request.get_json(silent=True) or {}
     idx = data.get('index')
@@ -4473,9 +4456,7 @@ def api_courier_favorites_rename():
 
 @app.route('/api/courier/fav-items', methods=['GET', 'POST', 'DELETE'])
 def api_courier_fav_items():
-    login = session.get('courier_user')
-    if not login:
-        return jsonify({'ok': False, 'error': 'auth'}), 401
+    login = session.get('courier_user') or 'courier'
     db, items = _cd_section(login, 'fav_items')
     if request.method == 'GET':
         return jsonify({'ok': True, 'items': items})
@@ -4581,6 +4562,497 @@ def api_courier_copy_cart():
             'errors': errors[:3],
         })
     return jsonify({'ok': True, 'src_items': len(src_items), 'results': results})
+
+
+# ---------- Делливери (dc.eda.yandex.net), клиент /dl/<token> ----------
+
+
+def dl_session(token):
+    sess, acc = delivery.get_delivery_session_account(token)
+    if not sess:
+        raise RuntimeError('сессия не найдена, истекла или отозвана')
+    if acc is None:
+        raise RuntimeError('аккаунт сессии не найден')
+    delivery.touch_delivery_session(token)
+    s = dict(sess)
+    s['account'] = acc
+    s['account_name'] = sess.get('account', '')
+    return s
+
+
+@app.route('/dl/<token>')
+def delivery_client_page(token):
+    if not delivery.get_delivery_session(token):
+        return render_template('delivery.html', token=token, invalid=True), 403
+    return render_template('delivery.html', token=token, invalid=False)
+
+
+@app.route('/api/dl/<token>/info')
+def api_dl_info(token):
+    try:
+        s = dl_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = s['account']
+    return jsonify({
+        'ok': True,
+        'name': s['name'],
+        'account': s['account_name'],
+        'expires_at': s['expires_at'],
+        'addr': s.get('address'),
+        'lat': acc.get('lat'),
+        'lon': acc.get('lon'),
+    })
+
+
+@app.route('/api/dl/<token>/layout')
+def api_dl_layout(token):
+    try:
+        s = dl_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = s['account']
+    try:
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        d = delivery.layout(acc, lat=lat, lon=lon)
+        places = delivery.parse_layout_places(d)
+        # показывать только магазины (меню ресторанов через dc.eda недоступно)
+        places = [p for p in places if p.get('business') == 'shop']
+        return jsonify({'ok': True, 'places': places})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dl/<token>/shop/<slug>')
+def api_dl_shop(token, slug):
+    try:
+        s = dl_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = s['account']
+    try:
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        info = delivery.shop_info(acc, slug, lat=lat, lon=lon)
+        # инфо для шапки
+        shop = info.get('found_shop') or info.get('place') or {}
+        name = (shop.get('name') or {}).get('value') if isinstance(shop.get('name'), dict) else shop.get('name')
+        logo = delivery._img_url(shop.get('picture') or shop.get('logo'))
+        return jsonify({'ok': True, 'name': name or slug, 'logo': logo,
+                        'rating': ((shop.get('rating') or {}).get('text')),
+                        'eta': ((shop.get('delivery_eta') or {}).get('text'))})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dl/<token>/menu/<slug>')
+def api_dl_menu(token, slug):
+    try:
+        s = dl_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = s['account']
+    try:
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        m = delivery.menu_categories(acc, slug, lat=lat, lon=lon)
+        cats = m.get('categories') or []
+        cards = []
+        for c in cats:
+            items = []
+            for it in c.get('items') or []:
+                items.append(_dl_item_card(it))
+            if c.get('items') or True:
+                cards.append({
+                    'uid': c.get('uid'),
+                    'name': (c.get('name') or {}).get('value')
+                            if isinstance(c.get('name'), dict) else c.get('name'),
+                    'items': items,
+                })
+        return jsonify({'ok': True, 'categories': cards})
+    except NotImplementedError as e:
+        return jsonify({'error': str(e)}), 501
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def _dl_item_card(it):
+    price = it.get('decimalPrice') or it.get('price')
+    promo = it.get('decimalPromoPrice') or it.get('promoPrice')
+    pic = it.get('picture') or {}
+    img = pic.get('url', '')
+    if img:
+        img = img.replace('{w}x{h}', '240x240')
+    return {
+        'uid': it.get('uid') or it.get('public_id'),
+        'name': it.get('name'),
+        'price': price,
+        'promo_price': promo,
+        'available': it.get('available', True),
+        'image': img,
+        'weight': it.get('weight', ''),
+        'rating': (it.get('rating') or {}).get('text'),
+        'in_stock': it.get('inStock'),
+    }
+
+
+@app.route('/api/dl/<token>/cart')
+def api_dl_cart(token):
+    try:
+        s = dl_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = s['account']
+    slug = request.args.get('slug', '')
+    try:
+        d = delivery.full_cart(acc, slug=slug or None)
+        return jsonify({'ok': True, 'cart': _dl_cart_summary(d)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def _dl_cart_summary(d):
+    cart = d.get('cart') or {}
+    items = []
+    for it in cart.get('items') or []:
+        mi = it.get('place_menu_item') or {}
+        pic = (mi.get('picture') or {})
+        img = pic.get('url', '') or pic.get('uri', '')
+        if img:
+            img = img.replace('{w}x{h}', '200x200')
+        items.append({
+            'id': it.get('id'),
+            'item_uid': it.get('item_uid') or it.get('public_id'),
+            'name': mi.get('name') or it.get('name'),
+            'price': it.get('decimal_price') or it.get('price'),
+            'promo_price': it.get('decimal_promo_price') or it.get('promo_price'),
+            'quantity': it.get('quantity'),
+            'subtotal': it.get('subtotal'),
+            'image': img,
+            'weight': it.get('weight', ''),
+            'available': it.get('available_quantity', 0) > 0,
+        })
+    return {
+        'id': cart.get('id'),
+        'place_slug': cart.get('place_slug'),
+        'items': items,
+        'subtotal': cart.get('decimal_subtotal') or cart.get('subtotal'),
+        'discount': cart.get('decimal_discount') or cart.get('discount'),
+        'discount_promo': cart.get('decimal_discount_promo') or cart.get('discount_promo'),
+        'delivery_fee': cart.get('decimal_delivery_fee') or cart.get('delivery_fee'),
+        'total': cart.get('decimal_total') or cart.get('total'),
+        'promos': cart.get('promos') or [],
+        'promocode': cart.get('promocode'),
+        'shipping_type': cart.get('shipping_type'),
+    }
+
+
+@app.route('/api/dl/<token>/cart/add', methods=['POST'])
+def api_dl_cart_add(token):
+    try:
+        s = dl_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = s['account']
+    data = request.get_json(silent=True) or {}
+    slug = data.get('slug', '')
+    item_id = data.get('item_id', '')
+    qty = int(data.get('quantity', 1))
+    if not slug or not item_id:
+        return jsonify({'error': 'slug и item_id обязательны'}), 400
+    try:
+        r = delivery.add_to_cart(acc, slug, item_id, quantity=qty)
+        return jsonify({'ok': True, 'id': r.get('id'),
+                        'cart_uuid': (r.get('cart') or {}).get('id')})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dl/<token>/cart/qty', methods=['POST'])
+def api_dl_cart_qty(token):
+    try:
+        s = dl_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = s['account']
+    data = request.get_json(silent=True) or {}
+    slug = data.get('slug', '')
+    cart_item_id = data.get('cart_item_id')
+    item_id = data.get('item_id', '')
+    qty = int(data.get('quantity', 0))
+    if not slug or not cart_item_id or not item_id:
+        return jsonify({'error': 'slug, cart_item_id, item_id обязательны'}), 400
+    try:
+        r = delivery.update_cart_item(acc, slug, cart_item_id, item_id, qty)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dl/<token>/promocode', methods=['GET'])
+def api_dl_promocode_check(token):
+    try:
+        s = dl_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = s['account']
+    try:
+        r = delivery.check_promo(acc)
+        return jsonify({'ok': True, 'promos': r})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dl/<token>/promocode', methods=['POST'])
+def api_dl_promocode_apply(token):
+    try:
+        s = dl_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = s['account']
+    data = request.get_json(silent=True) or {}
+    code = data.get('code', '')
+    slug = data.get('slug', '')
+    if not code:
+        return jsonify({'error': 'Введите промокод'}), 400
+    try:
+        r = delivery.apply_promo(acc, code, slug=slug)
+        return jsonify({'ok': True, 'result': r})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dl/<token>/promocode', methods=['DELETE'])
+def api_dl_promocode_remove(token):
+    try:
+        s = dl_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = s['account']
+    data = request.get_json(silent=True) or {}
+    offer = data.get('offer_identity', '')
+    slug = data.get('slug', '')
+    try:
+        delivery.remove_promo(acc, offer, slug=slug)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dl/<token>/checkout', methods=['POST'])
+def api_dl_checkout(token):
+    """Оформить корзину: вернуть offers (суммы, способы оплаты, offer_identity)."""
+    try:
+        s = dl_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = s['account']
+    data = request.get_json(silent=True) or {}
+    addr = data.get('address') or s.get('address') or {}
+    payment_id = data.get('payment_id') or 'card'
+    place_slug = data.get('place_slug') or ''
+    if not place_slug:
+        try:
+            fc = delivery.full_cart(acc)
+            place_slug = (fc.get('cart') or {}).get('place_slug') or ''
+        except Exception:
+            pass
+    if not addr or not addr.get('city'):
+        return jsonify({'error': 'Укажите адрес доставки'}), 400
+    if not place_slug:
+        return jsonify({'error': 'Не найдена корзина (place_slug)'}), 400
+    try:
+        built = delivery.build_address(addr)
+        r = delivery.go_checkout(acc, built, payment_id, place_slug)
+        offers = []
+        for o in (r.get('offers') or []):
+            pm = o.get('possiblePayment') or {}
+            offers.append({
+                'offer_identity': o.get('offer_identity'),
+                'available': (o.get('availability') or {}).get('available', True),
+                'payment_id': pm.get('id'),
+                'title': pm.get('title'),
+                'cost': (pm.get('costForCustomer') or {}).get('value'),
+                'service_fee': (pm.get('serviceFee') or {}).get('value'),
+                'discounts': pm.get('discounts') or [],
+            })
+        return jsonify({'ok': True, 'offers': offers, 'bdu': r.get('bdu_address')})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dl/<token>/order', methods=['POST'])
+def api_dl_order_create(token):
+    """Создать реальный заказ и вернуть order_nr (для оплаты SBP)."""
+    try:
+        s = dl_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = s['account']
+    data = request.get_json(silent=True) or {}
+    addr = data.get('address') or s.get('address') or {}
+    phone = data.get('phone', '')
+    payment = data.get('payment') or {}
+    comment = data.get('comment', '')
+    if not addr or not addr.get('city'):
+        return jsonify({'error': 'Укажите адрес доставки'}), 400
+    try:
+        fc = delivery.full_cart(acc)
+        cart = fc.get('cart') or {}
+        cart_uuid = cart.get('id')
+        place_slug = cart.get('place_slug')
+        total = cart.get('decimal_total') or cart.get('total')
+        # promo code из корзины
+        code = ''
+        proms = cart.get('promos') or []
+        if proms:
+            code = (proms[0].get('code') or '').upper()
+        if not code:
+            pc = cart.get('promocode') or {}
+            code = (pc.get('value') or '').upper()
+        payment_type = payment.get('type', 'sbp')
+        payment_method_id = payment.get('payment_method_id', 5)
+        request_id = f"{cart_uuid}.{uuid.uuid4().hex if False else uuid.uuid4().hex}"
+        payload = {
+            "payment_method_id": payment_method_id,
+            "comment": comment,
+            "phone": phone,
+            "persons_quantity": 0,
+            "code": code,
+            "address": delivery.build_address(addr),
+            "user_address_id": "",
+            "extended_options": [{"type": "delivery_options", "leave_at_the_door": False}],
+            "courier_options": [],
+            "payment_information": {"type": payment_type,
+                                    "costForCustomer": total},
+            "request_id": request_id,
+            "place_slug": place_slug,
+            "payment": {"recently_link_cards": False},
+            "plus_subscription_toggle_state": False,
+        }
+        r = delivery.create_order(acc, payload)
+        return jsonify({'ok': True, 'order_nr': r.get('order_nr'), 'order': r})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dl/<token>/tracking', methods=['POST'])
+def api_dl_tracking(token):
+    try:
+        s = dl_session(token)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 403
+    acc = s['account']
+    data = request.get_json(silent=True) or {}
+    order_id = data.get('order_id', '')
+    if not order_id:
+        return jsonify({'error': 'order_id обязателен'}), 400
+    try:
+        r = delivery.tracking(acc, order_id)
+        return jsonify({'ok': True, 'tracking': r})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# --- Админ-API: аккаунты и сессии делливери ---
+
+@app.route('/api/dl/accounts', methods=['GET'])
+def api_dl_accounts_list():
+    accs = delivery.load_delivery_accounts()
+    out = []
+    for a in accs:
+        c = a.get('creds') or {}
+        out.append({'name': a.get('name'), 'lat': a.get('lat'), 'lon': a.get('lon'),
+                    'has_bearer': bool(c.get('authorization')),
+                    'has_cookie': bool(c.get('cookie')), 'x_version': c.get('x_app_version')})
+    return jsonify({'ok': True, 'accounts': out})
+
+
+@app.route('/api/dl/accounts', methods=['POST'])
+def api_dl_accounts_create():
+    data = request.get_json(silent=True) or {}
+    name = data.get('name', '')
+    creds = data.get('creds') or data.get('credentials') or {}
+    lat = data.get('lat')
+    lon = data.get('lon')
+    try:
+        a = delivery.create_delivery_account(name, creds, lat=lat, lon=lon)
+        return jsonify({'ok': True, 'account': a.get('name')})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/dl/accounts/<name>', methods=['PUT'])
+def api_dl_accounts_update(name):
+    data = request.get_json(silent=True) or {}
+    try:
+        delivery.update_delivery_account(name, creds=data.get('creds'),
+                                         lat=data.get('lat'), lon=data.get('lon'))
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/dl/accounts/<name>', methods=['DELETE'])
+def api_dl_accounts_delete(name):
+    try:
+        delivery.delete_delivery_account(name)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/dl/sessions', methods=['GET'])
+def api_dl_sessions_list():
+    sess = delivery.load_delivery_sessions()
+    out = []
+    for tok, s in sess.items():
+        out.append({'token': tok, 'name': s.get('name'), 'account': s.get('account'),
+                    'active': s.get('active', True), 'expires_at': s.get('expires_at')})
+    return jsonify({'ok': True, 'sessions': out})
+
+
+@app.route('/api/dl/sessions', methods=['POST'])
+def api_dl_sessions_create():
+    data = request.get_json(silent=True) or {}
+    name = data.get('name', '')
+    account = data.get('account', '')
+    hours = int(data.get('hours', 24))
+    try:
+        token = delivery.create_delivery_session(name, account, hours=hours)
+        return jsonify({'ok': True, 'token': token, 'url': f'/dl/{token}'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/dl/sessions/<token>', methods=['DELETE'])
+def api_dl_sessions_delete(token):
+    delivery.delete_delivery_session(token)
+    return jsonify({'ok': True})
+
+
+def _start_sales_bot():
+    """Запустить бот активации ключей в фоновом потоке (Railway).
+
+    Не блокирует webapp: если Telegram недоступен — поток перезапускается
+    в sales_bot.run_in_background. Отключить: SALES_BOT_ENABLED=0.
+    """
+    if os.environ.get('SALES_BOT_ENABLED', '1') == '0':
+        return
+    try:
+        import sales_bot
+        sales_bot.run_in_background()
+        print(' * Sales bot: запущен в фоне')
+    except Exception as e:
+        print(f' * Sales bot: не стартовал: {e}')
+
+
+_start_sales_bot()
 
 
 if __name__ == '__main__':

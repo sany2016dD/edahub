@@ -45,3 +45,7 @@ _*.txt
 probe_*.py
 inject_*.py
 capture_*.py
+
+delivery_accounts.json
+delivery_sessions.json
+
