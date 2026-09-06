@@ -46,22 +46,81 @@
   }
   function clearErr() { $('catErr').classList.add('hidden'); }
 
+  // --- выбор адреса через яндекс.Карты (как в сессиях Еды) ---
+  let currentGeo = null;
+  let asTimer = null;
+  const addrInput = $('catAddr');
+  const asBox = () => $('addrSuggest');
+  addrInput.addEventListener('input', () => {
+    currentGeo = null;
+    clearTimeout(asTimer);
+    const box = asBox();
+    const q = addrInput.value.trim();
+    if (!q || !window.ymaps) { box.classList.add('hidden'); return; }
+    box.innerHTML = '<div class="mut" style="padding:10px">Поиск…</div>';
+    box.classList.remove('hidden');
+    asTimer = setTimeout(() => {
+      ymaps.suggest(q, { results: 7 }).then(res => {
+        if (!res || !res.length) {
+          box.innerHTML = '<div class="mut" style="padding:10px">Ничего не найдено</div>';
+          return;
+        }
+        box.innerHTML = '';
+        res.forEach(s => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'as-box-suggest';
+          const pos = s.items && s.items[0] && s.items[0].position;
+          b.innerHTML = '<span class="pin">📍</span><span>' + esc(s.value) + '</span>';
+          b.dataset.text = s.value;
+          if (pos) b.dataset.pos = pos[0] + ',' + pos[1];
+          b.addEventListener('click', async () => {
+            box.classList.add('hidden');
+            const text = b.dataset.text;
+            addrInput.value = text;
+            const p2 = (b.dataset.pos || '').split(',');
+            let lat = p2[1] ? Number(p2[1]) : null;
+            let lon = p2[0] ? Number(p2[0]) : null;
+            if (lat == null && window.ymaps) {
+              try {
+                const r = await ymaps.geocode(text, { results: 1 });
+                const o = r.geoObjects.get(0);
+                const c = o ? o.geometry.getCoordinates() : null;
+                if (c) { lat = c[0]; lon = c[1]; }
+              } catch (e) { /* ignore */ }
+            }
+            if (lat != null) currentGeo = { lat, lon, label: text };
+          });
+          box.appendChild(b);
+        });
+      }).catch(() => box.classList.add('hidden'));
+    }, 300);
+  });
+  document.addEventListener('click', (e) => {
+    const box = asBox();
+    if (!box.contains(e.target)) box.classList.add('hidden');
+  });
+
   $('catFind').addEventListener('click', async () => {
     const btn = $('catFind');
     clearErr();
     if (!$('catAccount').value) { showErr('Выберите аккаунт'); return; }
-    const addr = $('catAddr').value.trim();
+    const addr = addrInput.value.trim();
     if (!addr) { showErr('Введите адрес'); return; }
     btn.disabled = true;
     btn.innerHTML = '<span class="spin"></span>Поиск…';
     $('catShopsCard').classList.add('hidden');
     $('catResultsCard').classList.add('hidden');
     try {
-      const g = await api('/api/catalog/geocode', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: addr }),
-      });
-      $('catAddrLabel').textContent = g.label;
+      let g = currentGeo;
+      $('catAddrLabel').textContent = g ? g.label : addr;
+      if (!g) {
+        g = await api('/api/catalog/geocode', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ q: addr }),
+        });
+        $('catAddrLabel').textContent = g.label;
+      }
       const s = await api('/api/catalog/shops', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ account: $('catAccount').value, lat: g.lat, lon: g.lon }),

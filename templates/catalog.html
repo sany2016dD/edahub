@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Каталог магазинов — Яндекс Еда</title>
+<script src="https://api-maps.yandex.ru/2.1/?apikey=c0d403ab-e5be-4049-908c-8122a58acf23&lang=ru_RU" type="text/javascript"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
@@ -27,6 +28,12 @@ h3{font-size:14px;font-weight:800;margin-bottom:8px}
 label{display:block;font-size:12px;color:var(--ink2);margin-bottom:6px;font-weight:600}
 input,select{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:12px;font-size:14px;color:var(--ink);background:#fff;font-family:inherit;outline:none}
 input:focus,select:focus{border-color:var(--green)}
+.aswrap{position:relative}
+.asbox{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(33,32,31,.16);max-height:55vh;overflow:auto;padding:6px}
+.asbox.hidden{display:none}
+.as-box-suggest{display:flex;align-items:flex-start;gap:9px;padding:9px 10px;cursor:pointer;font-size:13.5px;border:none;background:none;width:100%;text-align:left;font-family:inherit;color:var(--ink);border-radius:8px}
+.as-box-suggest:hover{background:var(--bg)}
+.as-box-suggest .pin{opacity:.45;flex-shrink:0}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
 .row>div{flex:1;min-width:180px}
 .btn{display:inline-block;padding:11px 18px;border:none;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;background:var(--green);color:#fff}
@@ -95,7 +102,10 @@ input:focus,select:focus{border-color:var(--green)}
       </div>
       <div style="flex:2">
         <label>Адрес доставки</label>
-        <input id="catAddr" placeholder="например: Омск, проспект Мира, 56" autocomplete="off">
+        <div class="aswrap">
+          <input id="catAddr" placeholder="например: Омск, проспект Мира, 56" autocomplete="off">
+          <div id="addrSuggest" class="asbox hidden"></div>
+        </div>
       </div>
       <div style="flex:0 0 auto">
         <button class="btn" id="catFind">Найти магазины</button>
