@@ -7,6 +7,7 @@ import samokat
 import eda_reg
 import market
 import delivery
+import catalog
 from flask import Flask, jsonify, request, render_template, Response, session, redirect, url_for
 from concurrent.futures import ThreadPoolExecutor
 import time
@@ -32,6 +33,7 @@ def guard():
             p.startswith('/courier') or p.startswith('/api/courier/') or
             p.startswith('/api/eda/qr/') or p.startswith('/qr') or
             p.startswith('/demo') or p.startswith('/api/demo/') or
+            p.startswith('/catalog') or p.startswith('/api/catalog/') or
             (p.startswith('/api/coupons/shares/') and p.endswith('/data'))):
         return None
     if session.get('courier_user') and p.startswith('/api/eda/'):
@@ -115,6 +117,97 @@ def index():
 @app.route('/health')
 def health():
     return 'ok', 200
+
+
+# ---------- Каталог магазинов Я.Еды (парсер) ----------
+
+@app.route('/catalog')
+def catalog_page():
+    return render_template('catalog.html')
+
+
+@app.route('/api/catalog/accounts')
+def api_catalog_accounts():
+    accs = []
+    for a in eda.load_eda_accounts():
+        if eda._extract_bearer(a):
+            accs.append({'name': a.get('name'),
+                         'profile_name': a.get('profile_name', ''),
+                         'uid': a.get('yandexuid', '')})
+    return jsonify({'ok': True, 'accounts': accs})
+
+
+@app.route('/api/catalog/geocode', methods=['POST'])
+def api_catalog_geocode():
+    data = request.get_json(silent=True) or {}
+    try:
+        g = catalog.geocode(data.get('q', ''))
+        return jsonify({'ok': True, **g})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@app.route('/api/catalog/shops', methods=['POST'])
+def api_catalog_shops():
+    data = request.get_json(silent=True) or {}
+    try:
+        acc = data.get('account', '')
+        lat = float(data.get('lat'))
+        lon = float(data.get('lon'))
+        shops = catalog.list_shops(acc, lat, lon)
+        return jsonify({'ok': True, 'shops': shops})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@app.route('/api/catalog/parse', methods=['POST'])
+def api_catalog_parse():
+    data = request.get_json(silent=True) or {}
+    try:
+        acc = data.get('account', '')
+        slug = data.get('slug', '')
+        lat = float(data.get('lat'))
+        lon = float(data.get('lon'))
+        pid = catalog.run_parse_async(acc, slug, lat, lon)
+        return jsonify({'ok': True, 'parse_id': pid})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@app.route('/api/catalog/parse/<pid>')
+def api_catalog_parse_status(pid):
+    return jsonify({'ok': True, **catalog.parse_status(pid)})
+
+
+@app.route('/api/catalog/stores')
+def api_catalog_stores():
+    return jsonify({'ok': True, 'stores': catalog.list_stores()})
+
+
+@app.route('/api/catalog/store/<int:store_id>')
+def api_catalog_store(store_id):
+    try:
+        data = catalog.store_data(store_id)
+        if not data:
+            return jsonify({'ok': False, 'error': 'не найдено'}), 404
+        discount = request.args.get('discount') == '1'
+        cat = request.args.get('category', '') or None
+        products = catalog.store_products(store_id, discount_only=discount,
+                                          category=cat)
+        return jsonify({'ok': True, 'store': data['store'],
+                        'categories': data['categories'],
+                        'products': products})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@app.route('/api/catalog/store/<int:store_id>', methods=['DELETE'])
+def api_catalog_store_delete(store_id):
+    try:
+        catalog.delete_store(store_id)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
 
 
 @app.route('/api/accounts')
