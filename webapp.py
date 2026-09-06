@@ -192,8 +192,9 @@ def api_catalog_store(store_id):
             return jsonify({'ok': False, 'error': 'не найдено'}), 404
         discount = request.args.get('discount') == '1'
         cat = request.args.get('category', '') or None
+        sort = request.args.get('sort', 'default') or 'default'
         products = catalog.store_products(store_id, discount_only=discount,
-                                          category=cat)
+                                          category=cat, sort=sort)
         return jsonify({'ok': True, 'store': data['store'],
                         'categories': data['categories'],
                         'products': products})

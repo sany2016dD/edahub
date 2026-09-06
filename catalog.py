@@ -467,7 +467,7 @@ def store_data(store_id):
         conn.close()
 
 
-def store_products(store_id, discount_only=False, category=None, limit=5000):
+def store_products(store_id, discount_only=False, category=None, sort='default', limit=5000):
     conn = core._db()
     try:
         sql = ('SELECT id, category_uid, item_uid, name, price, promo_price,'
@@ -479,7 +479,16 @@ def store_products(store_id, discount_only=False, category=None, limit=5000):
         if category:
             sql += ' AND category_uid=%s'
             params.append(str(category))
-        sql += ' ORDER BY sort LIMIT %s'
+        order = {
+            'default': 'sort',
+            'discount': 'CASE WHEN discount_pct IS NULL THEN 0 ELSE discount_pct END DESC, sort',
+            'price_asc': 'COALESCE(promo_price, price) ASC NULLS LAST, sort',
+            'price_desc': 'COALESCE(promo_price, price) DESC NULLS LAST, sort',
+        }.get(sort, 'sort')
+        if core.USE_PG:
+            sql += f' ORDER BY {order} LIMIT %s'
+        else:
+            sql += f' ORDER BY {order.replace("NULLS LAST", "")} LIMIT %s'
         params.append(limit)
         cur = core._ex(conn, sql, params)
         return [dict(r) for r in cur.fetchall()]

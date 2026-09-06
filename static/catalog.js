@@ -263,9 +263,11 @@
     const view = $('catView');
     const discount = $('discFilter') ? $('discFilter').checked : false;
     const cat = $('catSel') ? $('catSel').value : '';
+    const sort = $('sortSel2') ? $('sortSel2').value : 'default';
     const qs = '/api/catalog/store/' + storeId +
       '?discount=' + (discount ? 1 : 0) +
-      (cat ? '&category=' + encodeURIComponent(cat) : '');
+      (cat ? '&category=' + encodeURIComponent(cat) : '') +
+      '&sort=' + encodeURIComponent(sort);
     try {
       const d = await api(qs);
       renderView(d.store, d.categories, d.products);
@@ -292,12 +294,21 @@
       '<option value="">Все категории</option>' +
       categories.map(c => '<option value="' + esc(c.uid) + '">' + esc(c.path || c.name) + '</option>').join('') +
       '</select>';
+    const sortWrap = document.createElement('div');
+    sortWrap.innerHTML = '<label>Сортировка</label><select id="sortSel2">' +
+      '<option value="discount">По скидке ▾</option>' +
+      '<option value="default">По категориям</option>' +
+      '<option value="price_asc">Цена по возрастанию</option>' +
+      '<option value="price_desc">Цена по убыванию</option>' +
+      '</select>';
     const cbWrap = document.createElement('div');
     cbWrap.innerHTML = '<label><input type="checkbox" id="discFilter"> Только со скидкой</label>';
     control.appendChild(selWrap);
+    control.appendChild(sortWrap);
     control.appendChild(cbWrap);
     view.appendChild(control);
     $('catSel').addEventListener('change', () => locale($('catStores').dataset.activeId));
+    $('sortSel2').addEventListener('change', () => locale($('catStores').dataset.activeId));
     $('discFilter').addEventListener('change', () => locale($('catStores').dataset.activeId));
 
     const grid = document.createElement('div');
