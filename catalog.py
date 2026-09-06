@@ -467,7 +467,7 @@ def store_data(store_id):
         conn.close()
 
 
-def store_products(store_id, discount_only=False, category=None, sort='default', limit=5000):
+def store_products(store_id, discount_only=False, category=None, sort='default', limit=60, offset=0):
     conn = core._db()
     try:
         sql = ('SELECT id, category_uid, item_uid, name, price, promo_price,'
@@ -486,12 +486,29 @@ def store_products(store_id, discount_only=False, category=None, sort='default',
             'price_desc': 'COALESCE(promo_price, price) DESC NULLS LAST, sort',
         }.get(sort, 'sort')
         if core.USE_PG:
-            sql += f' ORDER BY {order} LIMIT %s'
+            sql += f' ORDER BY {order} LIMIT %s OFFSET %s'
         else:
-            sql += f' ORDER BY {order.replace("NULLS LAST", "")} LIMIT %s'
-        params.append(limit)
+            sql += f' ORDER BY {order.replace("NULLS LAST", "")} LIMIT %s OFFSET %s'
+        params.extend([limit, offset])
         cur = core._ex(conn, sql, params)
         return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def store_products_total(store_id, discount_only=False, category=None):
+    conn = core._db()
+    try:
+        sql = 'SELECT COUNT(*) AS n FROM cat_products WHERE store_id=%s'
+        params = [store_id]
+        if discount_only:
+            sql += ' AND is_discount=1'
+        if category:
+            sql += ' AND category_uid=%s'
+            params.append(str(category))
+        cur = core._ex(conn, sql, params)
+        row = cur.fetchone()
+        return row['n'] if row else 0
     finally:
         conn.close()
 

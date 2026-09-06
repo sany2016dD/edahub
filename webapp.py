@@ -193,11 +193,16 @@ def api_catalog_store(store_id):
         discount = request.args.get('discount') == '1'
         cat = request.args.get('category', '') or None
         sort = request.args.get('sort', 'default') or 'default'
+        limit = min(int(request.args.get('limit', 60) or 60), 500)
+        offset = max(int(request.args.get('offset', 0) or 0), 0)
         products = catalog.store_products(store_id, discount_only=discount,
-                                          category=cat, sort=sort)
+                                          category=cat, sort=sort,
+                                          limit=limit, offset=offset)
+        total = catalog.store_products_total(store_id, discount_only=discount,
+                                             category=cat)
         return jsonify({'ok': True, 'store': data['store'],
                         'categories': data['categories'],
-                        'products': products})
+                        'products': products, 'total': total})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
 

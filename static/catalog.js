@@ -8,6 +8,11 @@
     return d.innerHTML;
   };
   const fmt = n => (n == null ? '' : String(n).replace('.', ','));
+  const PAGE = 60;
+  const state = { sort: 'discount', cat: '', discount: false };
+  let storeIdActive = null;
+  let page = 1;
+  let total = 0;
 
   async function api(url, opts) {
     const r = await fetch(url, opts);
@@ -154,17 +159,18 @@
       $('catShopsCard').classList.remove('hidden');
       return;
     }
-    shops.forEach(s => {
+    shops.forEach((s, i) => {
       const card = document.createElement('button');
       card.className = 'shop';
+      card.style.animationDelay = Math.min(i * 40, 400) + 'ms';
       card.innerHTML =
-        (s.logo ? '<img src="' + esc(s.logo) + '" alt="">'
+        (s.logo ? '<img class="logo" src="' + esc(s.logo) + '" alt="">'
                 : '<div class="noimg">🏬</div>') +
-        '<b>' + esc(s.name) + '</b>' +
-        '<div class="meta">' +
+        '<span class="si"><b>' + esc(s.name) + '</b>' +
+        '<span class="meta">' +
         (s.rating ? '<span class="star">★ ' + esc(fmt(s.rating)) + '</span>' : '') +
         '<span>' + esc(s.address) + '</span>' +
-        '</div>';
+        '</span></span>';
       card.addEventListener('click', () => startParse(s, lat, lon));
       box.appendChild(card);
     });
@@ -233,7 +239,7 @@
         const chip = document.createElement('button');
         chip.className = 'chip';
         chip.innerHTML = esc(st.name) + ' <span class="x">×</span> <span class="mut">' +
-          esc(st.products_count) + ' тов.</span>';
+          esc(st.products_count) + '</span>';
         chip.title = 'Удалить каталог';
         chip.dataset.id = st.id;
         chip.addEventListener('click', async (e) => {
@@ -246,49 +252,62 @@
           }
           wrap.dataset.activeId = st.id;
           [...wrap.children].forEach(c => c.classList.toggle('active', c.dataset.id === st.id));
-          locale(st.id);
+          openStore(st.id);
         });
         wrap.appendChild(chip);
       });
       if (storeId != null && list.some(st => String(st.id) === String(storeId))) {
         wrap.dataset.activeId = String(storeId);
         [...wrap.children].forEach(c => c.classList.toggle('active', c.dataset.id === String(storeId)));
-        locale(storeId);
+        openStore(storeId);
       }
     } catch (e) { /* ignore */ }
   }
 
-  async function locale(storeId) {
-    if (!storeId) { $('catView').innerHTML = ''; return; }
+  function openStore(id) {
+    storeIdActive = String(id);
+    page = 1;
+    locale();
+  }
+
+  async function locale() {
+    if (!storeIdActive) { $('catView').innerHTML = ''; return; }
     const view = $('catView');
-    const discount = $('discFilter') ? $('discFilter').checked : false;
-    const cat = $('catSel') ? $('catSel').value : '';
-    const sort = $('sortSel2') ? $('sortSel2').value : 'default';
-    const qs = '/api/catalog/store/' + storeId +
-      '?discount=' + (discount ? 1 : 0) +
-      (cat ? '&category=' + encodeURIComponent(cat) : '') +
-      '&sort=' + encodeURIComponent(sort);
+    view.innerHTML = '<div class="skgrid">' +
+      Array(6).fill('<div class="sk"></div>').join('') + '</div>';
+    $('catResultsCard').classList.remove('hidden');
+    const offset = (page - 1) * PAGE;
+    const qs = '/api/catalog/store/' + storeIdActive +
+      '?discount=' + (state.discount ? 1 : 0) +
+      (state.cat ? '&category=' + encodeURIComponent(state.cat) : '') +
+      '&sort=' + encodeURIComponent(state.sort) +
+      '&limit=' + PAGE + '&offset=' + offset;
     try {
       const d = await api(qs);
-      renderView(d.store, d.categories, d.products);
+      total = d.total || 0;
+      view.innerHTML = '';
+      renderHeader(d.store, d.categories);
+      const grid = document.createElement('div');
+      grid.className = 'plist';
+      grid.style.animation = 'fadeIn .22s ease both';
+      renderRows(grid, d.products || []);
+      view.appendChild(grid);
+      renderPager();
     } catch (e) {
       view.innerHTML = '<div class="error">' + esc(e.message) + '</div>';
     }
   }
 
-  function renderView(store, categories, products) {
+  function renderHeader(store, categories) {
     const view = $('catView');
-    view.innerHTML = '';
     const control = document.createElement('div');
     control.className = 'controls';
     control.innerHTML =
-      '<h3 style="margin-right:8px">' + esc(store.name) + '</h3>' +
-      '<span class="mut">' + esc(store.address || '') + '</span>' +
-      '<span class="mut"> · ' + esc(store.products_count) + ' товаров</span>';
-    if (store.discounts_count > 0) {
-      control.innerHTML += '<span class="mut"> · со скидкой: <b style="color:var(--green)">' +
-        esc(store.discounts_count) + '</b></span>';
-    }
+      '<h3>' + esc(store.name) + '</h3>' +
+      '<span class="mut">' + esc(store.address || '') + ' · ' +
+      esc(store.products_count) + ' товаров' +
+      (store.discounts_count > 0 ? ', со скидкой ' + esc(store.discounts_count) : '') +
+      '</span>';
     const selWrap = document.createElement('div');
     selWrap.innerHTML = '<label>Категория</label><select id="catSel">' +
       '<option value="">Все категории</option>' +
@@ -296,10 +315,10 @@
       '</select>';
     const sortWrap = document.createElement('div');
     sortWrap.innerHTML = '<label>Сортировка</label><select id="sortSel2">' +
-      '<option value="discount">По скидке ▾</option>' +
+      '<option value="discount">По скидке</option>' +
       '<option value="default">По категориям</option>' +
-      '<option value="price_asc">Цена по возрастанию</option>' +
-      '<option value="price_desc">Цена по убыванию</option>' +
+      '<option value="price_asc">Цена ↑</option>' +
+      '<option value="price_desc">Цена ↓</option>' +
       '</select>';
     const cbWrap = document.createElement('div');
     cbWrap.innerHTML = '<label><input type="checkbox" id="discFilter"> Только со скидкой</label>';
@@ -307,34 +326,99 @@
     control.appendChild(sortWrap);
     control.appendChild(cbWrap);
     view.appendChild(control);
-    $('catSel').addEventListener('change', () => locale($('catStores').dataset.activeId));
-    $('sortSel2').addEventListener('change', () => locale($('catStores').dataset.activeId));
-    $('discFilter').addEventListener('change', () => locale($('catStores').dataset.activeId));
+    $('catSel').value = state.cat;
+    $('sortSel2').value = state.sort;
+    $('discFilter').checked = state.discount;
+    $('catSel').addEventListener('change', () => { state.cat = $('catSel').value; page = 1; locale(); });
+    $('sortSel2').addEventListener('change', () => { state.sort = $('sortSel2').value; page = 1; locale(); });
+    $('discFilter').addEventListener('change', () => { state.discount = $('discFilter').checked; page = 1; locale(); });
+  }
 
-    const grid = document.createElement('div');
-    grid.className = 'pgrid';
-    if (!products.length) grid.innerHTML = '<div class="empty">Товаров нет</div>';
-    (products || []).forEach(p => {
-      const card = document.createElement('div');
-      card.className = 'pcard';
-      const img = p.picture ? '<img loading="lazy" src="' + esc(p.picture) + '" alt="">'
-                            : '<div class="noimg">🛒</div>';
-      const priceHtml = (p.promo_price != null && p.is_discount)
+  function renderRows(grid, rows) {
+    if (!rows.length) {
+      grid.innerHTML = '<div class="empty">Товаров нет</div>';
+      return;
+    }
+    rows.forEach((p, i) => {
+      const row = document.createElement('div');
+      row.className = 'prow';
+      row.style.animationDelay = Math.min(i * 8, 120) + 'ms';
+      const disc = p.is_discount && p.promo_price != null && p.discount_pct >= 1;
+      const priceHtml = disc
         ? '<div class="pp"><span class="old">' + esc(fmt(p.price)) + ' ₽</span>' +
           '<span class="new">' + esc(fmt(p.promo_price)) + ' ₽</span></div>'
-        : '<div class="pp"><span class="no-disc">' + esc(fmt(p.price)) + ' ₽</span></div>';
-      card.innerHTML =
-        '<div class="ph">' + img +
-        (p.is_discount ? '<div class="badge">−' + esc(Math.round(p.discount_pct || 0)) + '%</div>' : '') +
-        '</div>' +
-        '<div class="pcat">' + esc(p.category_uid || '') + '</div>' +
-        '<div class="pn">' + esc(p.name) + '</div>' +
+        : '<div class="pp"><span class="only">' + esc(fmt(p.price)) + ' ₽</span></div>';
+      row.innerHTML =
+        '<div class="pb' + (disc ? '' : ' off') + '">−' + esc(Math.round(p.discount_pct || 0)) + '%</div>' +
+        '<div class="pi"><div class="pn">' + esc(p.name) + '</div>' +
         (p.weight ? '<div class="pw">' + esc(p.weight) + '</div>' : '') +
+        '</div>' +
         priceHtml;
-      grid.appendChild(card);
+      grid.appendChild(row);
     });
-    view.appendChild(grid);
-    $('catResultsCard').classList.remove('hidden');
+  }
+
+  function pageList(cur, max) {
+    if (max <= 7) return Array.from({ length: max }, (_, i) => i + 1);
+    const set = new Set([1, 2, cur - 1, cur, cur + 1, max - 1, max]);
+    const arr = [...set].filter(p => p >= 1 && p <= max).sort((a, b) => a - b);
+    const out = [];
+    let prev = 0;
+    arr.forEach(p => {
+      if (p - prev > 1) out.push('…');
+      out.push(p);
+      prev = p;
+    });
+    return out;
+  }
+
+  function renderPager() {
+    const max = Math.max(1, Math.ceil(total / PAGE));
+    const from = (page - 1) * PAGE + 1;
+    const to = Math.min(total, page * PAGE);
+    const div = document.createElement('div');
+    div.className = 'pager';
+    div.innerHTML = total ? '<div class="info">Товары ' + from + '–' + to + ' из ' + total + '</div>' : '';
+    const nav = document.createElement('div');
+    nav.className = 'pnav';
+    const prev = document.createElement('button');
+    prev.className = 'pbtn';
+    prev.textContent = '‹ Назад';
+    prev.disabled = page <= 1;
+    prev.addEventListener('click', () => goPage(page - 1));
+    nav.appendChild(prev);
+    pageList(page, max).forEach(p => {
+      if (p === '…') {
+        const s = document.createElement('span');
+        s.className = 'dots';
+        s.textContent = '…';
+        nav.appendChild(s);
+        return;
+      }
+      const b = document.createElement('button');
+      b.className = 'pbtn' + (p === page ? ' cur' : '');
+      b.textContent = p;
+      b.addEventListener('click', () => goPage(p));
+      nav.appendChild(b);
+    });
+    const next = document.createElement('button');
+    next.className = 'pbtn';
+    next.textContent = 'Вперёд ›';
+    next.disabled = page >= max;
+    next.addEventListener('click', () => goPage(page + 1));
+    nav.appendChild(next);
+    div.appendChild(nav);
+    $('catView').appendChild(div);
+  }
+
+  function goPage(p) {
+    const max = Math.max(1, Math.ceil(total / PAGE));
+    if (p < 1 || p > max || p === page) return;
+    page = p;
+    const card = $('catResultsCard');
+    const top = card.getBoundingClientRect().top + window.scrollY - 70;
+    locale();
+    window.scrollTo({ top: Math.max(top, 0), behavior: 'smooth' });
   }
 
   loadAccounts();
