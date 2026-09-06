@@ -101,6 +101,23 @@
     if (!box.contains(e.target)) box.classList.add('hidden');
   });
 
+  async function getCoords(addr) {
+    // координаты через яндекс.Карты (надёжно для РФ); серверный геокодер — только fallback
+    if (window.ymaps) {
+      try {
+        const r = await ymaps.geocode(addr, { results: 1 });
+        const o = r.geoObjects.get(0);
+        const c = o ? o.geometry.getCoordinates() : null;
+        if (c) return { lat: c[0], lon: c[1], label: o.getAddressLine() || addr };
+      } catch (e) { /* fallback ниже */ }
+    }
+    const g = await api('/api/catalog/geocode', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: addr }),
+    });
+    return g;
+  }
+
   $('catFind').addEventListener('click', async () => {
     const btn = $('catFind');
     clearErr();
@@ -114,13 +131,8 @@
     try {
       let g = currentGeo;
       $('catAddrLabel').textContent = g ? g.label : addr;
-      if (!g) {
-        g = await api('/api/catalog/geocode', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ q: addr }),
-        });
-        $('catAddrLabel').textContent = g.label;
-      }
+      if (!g) g = await getCoords(addr);
+      $('catAddrLabel').textContent = g.label || addr;
       const s = await api('/api/catalog/shops', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ account: $('catAccount').value, lat: g.lat, lon: g.lon }),
@@ -138,7 +150,7 @@
     const box = $('catShops');
     box.innerHTML = '';
     if (!shops || !shops.length) {
-      box.innerHTML = '<div class="empty">Магазины по этому адресу не найдены</div>';
+      box.innerHTML = '<div class="empty">Магазины по этому адресу не найдены.<br>Проверьте адрес и выберите подсказку из списка.</div>';
       $('catShopsCard').classList.remove('hidden');
       return;
     }
@@ -184,12 +196,7 @@
   function pollParse(pid) {
     const stop = (msg) => {
       $('catProgressMsg').textContent = msg;
-      setTimeout(() => {
-        $('catProgressCard').classList.add('hidden');
-        loadStores();
-        const d = $('catStores').dataset.activeId;
-        locale(d);
-      }, 600);
+      setTimeout(() => $('catProgressCard').classList.add('hidden'), 600);
     };
     const t = setInterval(async () => {
       try {
@@ -198,7 +205,9 @@
         $('catProgressMsg').textContent = (d.msg || '') + (d.total ? ' (' + d.done + '/' + d.total + ')' : '');
         if (d.state === 'done') {
           clearInterval(t);
+          const sid = d.summary ? d.summary.store_id : null;
           stop('Готово ✓ ' + (d.summary ? d.summary.products + ' товаров, из них со скидкой: ' + d.summary.discounts : ''));
+          loadStores(sid);
         } else if (d.state === 'error') {
           clearInterval(t);
           stop('');
@@ -212,13 +221,15 @@
     }, 1500);
   }
 
-  async function loadStores() {
+  async function loadStores(storeId) {
     try {
       const d = await api('/api/catalog/stores');
       const wrap = $('catStores');
       wrap.innerHTML = '';
+      const list = d.stores || [];
+      if (storeId == null && list.length) storeId = list[0].id;
       wrap.dataset.activeId = '';
-      (d.stores || []).forEach(st => {
+      (list).forEach(st => {
         const chip = document.createElement('button');
         chip.className = 'chip';
         chip.innerHTML = esc(st.name) + ' <span class="x">×</span> <span class="mut">' +
@@ -239,6 +250,11 @@
         });
         wrap.appendChild(chip);
       });
+      if (storeId != null && list.some(st => String(st.id) === String(storeId))) {
+        wrap.dataset.activeId = String(storeId);
+        [...wrap.children].forEach(c => c.classList.toggle('active', c.dataset.id === String(storeId)));
+        locale(storeId);
+      }
     } catch (e) { /* ignore */ }
   }
 
